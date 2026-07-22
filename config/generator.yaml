@@ -1,0 +1,39 @@
+# =============================================================================
+# Generator Configuration — Vietnam Stock Market Data Generator
+# Based on 01_data_generator.md Section 5
+# =============================================================================
+
+# Universe
+n_tickers: 50
+vn30_count: 30
+vn30_volume_share: 0.80
+industry_value_share:
+  banking: 0.35
+  real_estate: 0.25
+days_history: 30
+trading_calendar: "HOSE"             # weekday minus VN public holidays
+price_limit_pct:
+  HOSE: 0.07
+  HNX: 0.10
+  UPCOM: 0.15
+
+# Offline problems
+duplicate_rate_offline: 0.02
+schema_change_date: "2025-07-01"     # partitions before this miss foreign_room, value
+
+# Landing / source-system simulation
+landing_offline_bucket: "landing-vendor-offline"
+landing_db_dsn: "postgresql://vendor_db"
+
+# Streaming
+base_events_per_min: 200
+burst_multiplier: 25
+burst_windows:
+  - "09:00-09:15"                    # ATO auction
+  - "14:30-14:45"                    # ATC auction
+late_arrival_rate: 0.12
+late_delay_sec_min_max: [5, 45]
+duplicate_rate_stream: 0.015
+
+# Reproducibility
+random_seed: 42

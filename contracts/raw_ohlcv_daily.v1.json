@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "raw_ohlcv_daily.v1",
+  "description": "OHLCV daily data contract — partitions before 2025-07-01",
+  "type": "object",
+  "required": ["ticker_id", "trade_date", "open", "high", "low", "close", "volume"],
+  "properties": {
+    "ticker_id":   { "type": "string" },
+    "trade_date":  { "type": "string", "format": "date" },
+    "open":        { "type": "number", "exclusiveMinimum": 0 },
+    "high":        { "type": "number", "exclusiveMinimum": 0 },
+    "low":         { "type": "number", "exclusiveMinimum": 0 },
+    "close":       { "type": "number", "exclusiveMinimum": 0 },
+    "volume":      { "type": "integer", "minimum": 0 }
+  }
+}

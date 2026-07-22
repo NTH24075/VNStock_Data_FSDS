@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtualenv
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Testing
+.pytest_cache/
+htmlcov/
+.coverage
+.mutmut-cache
+mutmut-results/
+
+# Linting
+.mypy_cache/
+.ruff_cache/
+
+# Environment
+.env
+*.env.local
+
+# Docker volumes
+docker-data/
+
+# Delta Lake
+_delta_log/
+
+# Spark
+metastore_db/
+derby.log
+spark-warehouse/
+
+# Airflow
+/airflow/
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
