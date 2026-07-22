@@ -33,7 +33,8 @@ with DAG(
     SILVER_DIR = os.getenv("SILVER_DIR", "data/silver")
 
     def dedup_ohlcv(**context):
-        from jobs.silver_transform import dedup, get_spark, read_bronze_ohlcv, validate_domain
+        from jobs.silver.daily import dedup, read_bronze_ohlcv, validate_domain
+        from jobs.spark_session import get_spark
 
         spark = get_spark("silver_ohlcv")
         try:
@@ -51,7 +52,8 @@ with DAG(
             spark.stop()
 
     def dedup_foreign_flow(**context):
-        from jobs.silver_transform import dedup, get_spark
+        from jobs.silver.daily import dedup
+        from jobs.spark_session import get_spark
 
         spark = get_spark("silver_ff")
         try:
@@ -74,7 +76,7 @@ with DAG(
     def validate_uniqueness(**context):
         from pyspark.sql import functions as F
 
-        from jobs.silver_transform import get_spark
+        from jobs.spark_session import get_spark
 
         spark = get_spark("silver_val_unique")
         try:
@@ -94,7 +96,7 @@ with DAG(
     def validate_referential(**context):
         from pyspark.sql import functions as F
 
-        from jobs.silver_transform import get_spark
+        from jobs.spark_session import get_spark
 
         spark = get_spark("silver_val_ref")
         try:
@@ -116,7 +118,8 @@ with DAG(
     def validate_domain(**context):
         from pyspark.sql import functions as F
 
-        from jobs.silver_transform import get_spark, validate_domain
+        from jobs.silver.daily import validate_domain
+        from jobs.spark_session import get_spark
 
         spark = get_spark("silver_val_domain")
         try:
@@ -135,7 +138,7 @@ with DAG(
     def validate_duplicates(**context):
         from pyspark.sql import functions as F
 
-        from jobs.silver_transform import get_spark
+        from jobs.spark_session import get_spark
 
         spark = get_spark("silver_val_dup")
         try:

@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "stg_quotes.v1",
+  "description": "Deduplicated quote events from silver_stream — grain: one per event_id",
+  "type": "object",
+  "required": ["event_id", "event_ts", "ticker", "bid_price", "ask_price"],
+  "properties": {
+    "event_id":          { "type": "string" },
+    "event_ts":          { "type": "string", "format": "date-time" },
+    "created_ts_parsed": { "type": "string", "format": "date-time" },
+    "session_type":      { "type": "string" },
+    "ticker":            { "type": "string" },
+    "exchange":          { "type": "string" },
+    "bid_price":         { "type": "number", "exclusiveMinimum": 0 },
+    "bid_qty":           { "type": "integer", "minimum": 0 },
+    "ask_price":         { "type": "number", "exclusiveMinimum": 0 },
+    "ask_qty":           { "type": "integer", "minimum": 0 },
+    "source_offset":     { "type": "integer" },
+    "kafka_ts":          { "type": "string", "format": "date-time" },
+    "_ingested_at":      { "type": "string", "format": "date-time" },
+    "_late_flag":        { "type": "boolean" }
+  }
+}

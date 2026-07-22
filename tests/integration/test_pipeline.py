@@ -105,7 +105,7 @@ class TestPipelineEndToEnd:
         assert gen_result["ohlcv"] > 0
 
         # 2. Bronze — read landing parquet + write delta
-        from jobs.bronze_ingest import add_ingest_metadata, read_landing_parquet, validate_contract
+        from jobs.bronze.offline import add_ingest_metadata, read_landing_parquet, validate_contract
         from datetime import datetime
         import json
         batch_id_str = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -130,7 +130,7 @@ class TestPipelineEndToEnd:
         assert os.path.exists(os.path.join(bronze_dir, "raw_ohlcv_daily_v1"))
 
         # 3. Silver
-        from jobs.silver_transform import dedup, read_bronze_ohlcv, validate_domain
+        from jobs.silver.daily import dedup, read_bronze_ohlcv, validate_domain
 
         df = read_bronze_ohlcv(spark, bronze_dir)
         assert df.count() > 0
@@ -142,11 +142,13 @@ class TestPipelineEndToEnd:
         assert os.path.exists(os.path.join(silver_dir, "stg_daily_price"))
 
         # 4. Gold
-        from jobs.gold_model import (
-            build_dim_date, build_dim_ticker, build_fact_daily_price,
-            build_feat_ticker_daily, build_ml_ticker_label, build_obt,
-            read_silver_daily,
+        from jobs.gold.dimensions import (
+            build_dim_date, build_dim_ticker, read_silver_daily,
         )
+        from jobs.gold.facts import build_fact_daily_price
+        from jobs.gold.features import build_feat_ticker_daily
+        from jobs.gold.labels import build_ml_ticker_label
+        from jobs.gold.obt import build_obt
 
         df_silver = read_silver_daily(spark, silver_dir)
 
@@ -164,7 +166,7 @@ class TestPipelineEndToEnd:
         assert os.path.exists(os.path.join(gold_dir, "ml_ticker_label"))
 
         # 5. Drift
-        from jobs.drift_monitor import build_agg_feature_health, build_ml_ticker_training
+        from jobs.gold.drift import build_agg_feature_health, build_ml_ticker_training
 
         build_agg_feature_health(spark, gold_dir)
         assert os.path.exists(os.path.join(gold_dir, "agg_feature_health_daily"))

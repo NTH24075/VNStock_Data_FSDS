@@ -1,20 +1,15 @@
 """Silver transformations — Bronze Delta → Silver Delta."""
 
 import argparse
+import logging
 import os
 
 from pyspark.sql import DataFrame, SparkSession, Window
 from pyspark.sql import functions as F
 
+from jobs.spark_session import get_spark
 
-def get_spark(app_name: str = "silver_transform") -> SparkSession:
-    return (
-        SparkSession.builder.appName(app_name)
-        .master("local[*]")
-        .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
-        .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
-        .getOrCreate()
-    )
+logger = logging.getLogger(__name__)
 
 
 def read_bronze_ohlcv(spark: SparkSession, bronze_dir: str) -> DataFrame:
@@ -44,7 +39,7 @@ def dedup(df: DataFrame) -> DataFrame:
     after = result.count()
     removed = before - after
     pct = removed / max(before, 1) * 100
-    print(f"  Dedup: {before} -> {after} rows ({removed} removed, {pct:.1f}%)")
+    logger.info("  Dedup: %d -> %d rows (%d removed, %.1f%%)", before, after, removed, pct)
     return result
 
 
@@ -61,7 +56,7 @@ def validate_domain(df: DataFrame) -> DataFrame:
           & F.col("_dq_high_ge_max")
           & F.col("_dq_low_le_min"))
     ).count()
-    print(f"  Domain check failures: {bad} rows (flagged, not dropped)")
+    logger.info("  Domain check failures: %d rows (flagged, not dropped)", bad)
     return result
 
 
@@ -71,22 +66,23 @@ def main():
     parser.add_argument("--silver-dir", default="data/silver")
     args = parser.parse_args()
 
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
     spark = get_spark()
 
-    print("\n=== Silver: stg_daily_price ===")
+    logger.info("=== Silver: stg_daily_price ===")
 
     df = read_bronze_ohlcv(spark, args.bronze_dir)
-    print(f"  Read {df.count()} rows from Bronze (v1+v2 merged)")
+    logger.info("  Read %d rows from Bronze (v1+v2 merged)", df.count())
 
     df = dedup(df)
     df = validate_domain(df)
 
     out_path = os.path.join(args.silver_dir, "stg_daily_price")
     df.write.format("delta").mode("overwrite").save(out_path)
-    print(f"  Wrote {df.count()} rows -> {out_path}")
+    logger.info("  Wrote %d rows -> %s", df.count(), out_path)
 
     spark.stop()
-    print("Silver transformation complete.")
+    logger.info("Silver transformation complete.")
 
 
 if __name__ == "__main__":

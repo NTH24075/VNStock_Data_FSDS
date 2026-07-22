@@ -1,6 +1,7 @@
 """Drift monitoring — PSI, feature health, drift alerts, training table."""
 
 import argparse
+import logging
 import os
 from datetime import datetime
 
@@ -10,15 +11,9 @@ import pandas as pd
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 
+from jobs.spark_session import get_spark
 
-def get_spark(app_name: str = "drift_monitor") -> SparkSession:
-    return (
-        SparkSession.builder.appName(app_name)
-        .master("local[*]")
-        .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
-        .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
-        .getOrCreate()
-    )
+logger = logging.getLogger(__name__)
 
 
 def compute_psi(expected: pd.Series, actual: pd.Series, bins: int = 10) -> float:
@@ -41,13 +36,13 @@ def compute_psi(expected: pd.Series, actual: pd.Series, bins: int = 10) -> float
 def build_agg_feature_health(spark: SparkSession, gold_dir: str):
     feat_path = os.path.join(gold_dir, "feat_ticker_daily")
     if not os.path.exists(feat_path):
-        print("  No feature data — skipping feature health")
+        logger.info("  No feature data — skipping feature health")
         return
 
     feat_df = spark.read.format("delta").load(feat_path)
     fact_path = os.path.join(gold_dir, "fact_daily_price")
     if not os.path.exists(fact_path):
-        print("  No fact data — skipping feature health")
+        logger.info("  No fact data — skipping feature health")
         return
 
     fact = spark.read.format("delta").load(fact_path)
@@ -83,7 +78,7 @@ def build_agg_feature_health(spark: SparkSession, gold_dir: str):
             })
 
     if not rows:
-        print("  Not enough data for feature health — skipping")
+        logger.info("  Not enough data for feature health — skipping")
         return
 
     health_pd = pd.DataFrame(rows)
@@ -93,7 +88,7 @@ def build_agg_feature_health(spark: SparkSession, gold_dir: str):
 
     alerts = health_pd[health_pd["alert_flag"]]
     n_alerts = len(alerts)
-    print(f"  agg_feature_health_daily: {len(health_pd)} rows, {n_alerts} alerts -> {out}")
+    logger.info("  agg_feature_health_daily: %d rows, %d alerts -> %s", len(health_pd), n_alerts, out)
 
     if n_alerts > 0:
         alert_pd = pd.DataFrame({
@@ -105,7 +100,7 @@ def build_agg_feature_health(spark: SparkSession, gold_dir: str):
         alert_df = spark.createDataFrame(alert_pd)
         alert_out = os.path.join(gold_dir, "feature_drift_alerts")
         alert_df.write.format("delta").mode("overwrite").save(alert_out)
-        print(f"  feature_drift_alerts: {n_alerts} rows -> {alert_out}")
+        logger.info("  feature_drift_alerts: %d rows -> %s", n_alerts, alert_out)
 
     return health
 
@@ -115,7 +110,7 @@ def build_ml_ticker_training(spark: SparkSession, gold_dir: str):
     feat_path = os.path.join(gold_dir, "feat_ticker_daily")
 
     if not os.path.exists(label_path) or not os.path.exists(feat_path):
-        print("  Missing label or feature data — skipping training table")
+        logger.info("  Missing label or feature data — skipping training table")
         return
 
     labels = spark.read.format("delta").load(label_path)
@@ -131,7 +126,7 @@ def build_ml_ticker_training(spark: SparkSession, gold_dir: str):
     result.write.format("delta").mode("overwrite").save(out)
 
     pos_rate = result.filter(F.col("label") == 1).count() / max(result.count(), 1) * 100
-    print(f"  ml_ticker_training: {result.count()} rows, positive rate={pos_rate:.1f}% -> {out}")
+    logger.info("  ml_ticker_training: %d rows, positive rate=%.1f%% -> %s", result.count(), pos_rate, out)
 
 
 def generate_drift_report(spark: SparkSession, gold_dir: str):
@@ -153,7 +148,7 @@ def generate_drift_report(spark: SparkSession, gold_dir: str):
     report_pd["drift_status"] = report_pd["psi_vs_baseline"].apply(drift_status)
     out = "data/drift_validation_report.csv"
     report_pd.to_csv(out, index=False)
-    print(f"\nDrift validation report -> {out}")
+    logger.info("Drift validation report -> %s", out)
 
 
 def main():
@@ -161,19 +156,20 @@ def main():
     parser.add_argument("--gold-dir", default="data/gold")
     args = parser.parse_args()
 
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
     spark = get_spark()
 
-    print("\n=== Drift: Feature Health ===")
+    logger.info("=== Drift: Feature Health ===")
     build_agg_feature_health(spark, args.gold_dir)
 
-    print("\n=== Training Table ===")
+    logger.info("=== Training Table ===")
     build_ml_ticker_training(spark, args.gold_dir)
 
-    print("\n=== Drift Report ===")
+    logger.info("=== Drift Report ===")
     generate_drift_report(spark, args.gold_dir)
 
     spark.stop()
-    print("Drift monitoring complete.")
+    logger.info("Drift monitoring complete.")
 
 
 if __name__ == "__main__":

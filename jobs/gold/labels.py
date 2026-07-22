@@ -1,19 +1,14 @@
 """Gold labels — ml_ticker_label (price_up_next_3d)."""
 
+import logging
 import os
 
 from pyspark.sql import SparkSession, Window
 from pyspark.sql import functions as F
 
+from jobs.spark_session import get_spark
 
-def get_spark(app_name: str = "gold_labels") -> SparkSession:
-    return (
-        SparkSession.builder.appName(app_name)
-        .master("local[*]")
-        .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
-        .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
-        .getOrCreate()
-    )
+logger = logging.getLogger(__name__)
 
 
 def build_ml_ticker_label(spark: SparkSession, gold_dir: str):
@@ -42,4 +37,4 @@ def build_ml_ticker_label(spark: SparkSession, gold_dir: str):
     result.write.format("delta").mode("overwrite").save(out)
 
     pos_rate = result.filter(F.col("label") == 1).count() / max(result.count(), 1) * 100
-    print(f"  ml_ticker_label: {result.count()} rows, positive rate={pos_rate:.1f}% -> {out}")
+    logger.info("  ml_ticker_label: %d rows, positive rate=%.1f%% -> %s", result.count(), pos_rate, out)

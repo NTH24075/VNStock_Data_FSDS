@@ -1,19 +1,14 @@
 """Gold facts — fact_daily_price, fact_intraday_trade."""
 
+import logging
 import os
 
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 
+from jobs.spark_session import get_spark
 
-def get_spark(app_name: str = "gold_facts") -> SparkSession:
-    return (
-        SparkSession.builder.appName(app_name)
-        .master("local[*]")
-        .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
-        .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
-        .getOrCreate()
-    )
+logger = logging.getLogger(__name__)
 
 
 def build_fact_daily_price(spark: SparkSession, df: DataFrame, gold_dir: str):
@@ -40,7 +35,7 @@ def build_fact_daily_price(spark: SparkSession, df: DataFrame, gold_dir: str):
 
     out = os.path.join(gold_dir, "fact_daily_price")
     fact.write.format("delta").mode("overwrite").save(out)
-    print(f"  fact_daily_price: {fact.count()} rows -> {out}")
+    logger.info("  fact_daily_price: %d rows -> %s", fact.count(), out)
 
 
 def build_fact_intraday_trade(spark: SparkSession, gold_dir: str):
@@ -48,4 +43,4 @@ def build_fact_intraday_trade(spark: SparkSession, gold_dir: str):
     empty = spark.createDataFrame([], schema=schema)
     out = os.path.join(gold_dir, "fact_intraday_trade")
     empty.write.format("delta").mode("overwrite").save(out)
-    print(f"  fact_intraday_trade: stub created -> {out}")
+    logger.info("  fact_intraday_trade: stub created -> %s", out)

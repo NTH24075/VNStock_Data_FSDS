@@ -1,19 +1,14 @@
 """Gold metadata — ops_pipeline_run."""
 
+import logging
 import os
 from datetime import datetime as dt
 
 from pyspark.sql import SparkSession
 
+from jobs.spark_session import get_spark
 
-def get_spark(app_name: str = "gold_metadata") -> SparkSession:
-    return (
-        SparkSession.builder.appName(app_name)
-        .master("local[*]")
-        .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
-        .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
-        .getOrCreate()
-    )
+logger = logging.getLogger(__name__)
 
 
 def write_pipeline_run_metadata(spark: SparkSession, gold_dir: str, pipeline: str, status: str,
@@ -26,4 +21,4 @@ def write_pipeline_run_metadata(spark: SparkSession, gold_dir: str, pipeline: st
     meta = spark.createDataFrame(row, schema=schema)
     out = os.path.join(gold_dir, "ops_pipeline_run")
     meta.write.format("delta").mode("append").save(out)
-    print(f"  ops_pipeline_run: {pipeline} -> {status} (run_id={run_id})")
+    logger.info("  ops_pipeline_run: %s -> %s (run_id=%s)", pipeline, status, run_id)

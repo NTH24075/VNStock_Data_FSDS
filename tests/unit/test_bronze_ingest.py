@@ -1,6 +1,6 @@
 import pytest
 
-from jobs.bronze_ingest import add_ingest_metadata, validate_contract
+from jobs.bronze.offline import add_ingest_metadata, validate_contract
 
 
 @pytest.fixture(scope="module")

@@ -1,19 +1,14 @@
 """Gold OBT — obt_ticker_daily_performance."""
 
+import logging
 import os
 
 from pyspark.sql import SparkSession, Window
 from pyspark.sql import functions as F
 
+from jobs.spark_session import get_spark
 
-def get_spark(app_name: str = "gold_obt") -> SparkSession:
-    return (
-        SparkSession.builder.appName(app_name)
-        .master("local[*]")
-        .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
-        .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
-        .getOrCreate()
-    )
+logger = logging.getLogger(__name__)
 
 
 def build_obt(spark: SparkSession, gold_dir: str):
@@ -68,4 +63,4 @@ def build_obt(spark: SparkSession, gold_dir: str):
 
     out = os.path.join(gold_dir, "obt_ticker_daily_performance")
     result.write.format("delta").mode("overwrite").save(out)
-    print(f"  obt_ticker_daily_performance: {result.count()} rows -> {out}")
+    logger.info("  obt_ticker_daily_performance: %d rows -> %s", result.count(), out)

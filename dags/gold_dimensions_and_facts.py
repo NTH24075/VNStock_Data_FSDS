@@ -33,7 +33,8 @@ with DAG(
     GOLD_DIR = os.getenv("GOLD_DIR", "data/gold")
 
     def build_dim_ticker_scd2(**context):
-        from jobs.gold_model import build_dim_ticker, get_spark, read_silver_daily
+        from jobs.gold.dimensions import build_dim_ticker, read_silver_daily
+        from jobs.spark_session import get_spark
 
         spark = get_spark("gold_dim_ticker")
         try:
@@ -43,10 +44,11 @@ with DAG(
             spark.stop()
 
     def seed_static_dims(**context):
-        from jobs.gold_model import (
+        from jobs.gold.dimensions import (
             build_dim_date, build_dim_exchange, build_dim_industry,
-            build_dim_session, get_spark, read_silver_daily,
+            build_dim_session, read_silver_daily,
         )
+        from jobs.spark_session import get_spark
 
         spark = get_spark("gold_static_dims")
         try:
@@ -60,7 +62,9 @@ with DAG(
             spark.stop()
 
     def build_fact_daily_price(**context):
-        from jobs.gold_model import build_fact_daily_price, get_spark, read_silver_daily
+        from jobs.gold.facts import build_fact_daily_price
+        from jobs.gold.dimensions import read_silver_daily
+        from jobs.spark_session import get_spark
 
         spark = get_spark("gold_fact_price")
         try:
@@ -70,7 +74,7 @@ with DAG(
             spark.stop()
 
     def build_fact_foreign_flow(**context):
-        from jobs.gold_model import get_spark
+        from jobs.spark_session import get_spark
 
         spark = get_spark("gold_fact_ff")
         try:
@@ -87,7 +91,8 @@ with DAG(
             spark.stop()
 
     def build_fact_intraday(**context):
-        from jobs.gold_model import build_fact_intraday_trade, get_spark
+        from jobs.gold.facts import build_fact_intraday_trade
+        from jobs.spark_session import get_spark
 
         spark = get_spark("gold_fact_intraday")
         try:
@@ -96,7 +101,8 @@ with DAG(
             spark.stop()
 
     def build_obt(**context):
-        from jobs.gold_model import build_obt, get_spark
+        from jobs.gold.obt import build_obt
+        from jobs.spark_session import get_spark
 
         spark = get_spark("gold_obt")
         try:
@@ -109,7 +115,7 @@ with DAG(
     def validate_referential(**context):
         from pyspark.sql import functions as F
 
-        from jobs.gold_model import get_spark
+        from jobs.spark_session import get_spark
 
         spark = get_spark("gold_val_ref")
         try:
@@ -140,7 +146,7 @@ with DAG(
     def validate_scd2(**context):
         from pyspark.sql import functions as F
 
-        from jobs.gold_model import get_spark
+        from jobs.spark_session import get_spark
 
         spark = get_spark("gold_val_scd2")
         try:
@@ -160,7 +166,8 @@ with DAG(
             spark.stop()
 
     def write_run_metadata(**context):
-        from jobs.gold_model import get_spark, write_pipeline_run_metadata
+        from jobs.gold.metadata import write_pipeline_run_metadata
+        from jobs.spark_session import get_spark
 
         spark = get_spark("gold_ops")
         try:

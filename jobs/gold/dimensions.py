@@ -1,19 +1,14 @@
 """Gold dimensions — dim_date, dim_ticker (SCD2), dim_industry, dim_exchange, dim_session."""
 
+import logging
 import os
 
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 
+from jobs.spark_session import get_spark
 
-def get_spark(app_name: str = "gold_dimensions") -> SparkSession:
-    return (
-        SparkSession.builder.appName(app_name)
-        .master("local[*]")
-        .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
-        .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
-        .getOrCreate()
-    )
+logger = logging.getLogger(__name__)
 
 
 def read_silver_daily(spark: SparkSession, silver_dir: str) -> DataFrame:
@@ -36,7 +31,7 @@ def build_dim_date(spark: SparkSession, df: DataFrame, gold_dir: str):
     dim.write.format("delta").mode("overwrite").save(out)
     trading = dim.filter(F.col("is_trading_day")).count()
     nontrading = dim.filter(~F.col("is_trading_day")).count()
-    print(f"  dim_date: {dim.count()} rows ({trading} trading, {nontrading} non-trading) -> {out}")
+    logger.info("  dim_date: %d rows (%d trading, %d non-trading) -> %s", dim.count(), trading, nontrading, out)
 
 
 def build_dim_ticker(spark: SparkSession, df: DataFrame, gold_dir: str) -> DataFrame:
@@ -74,7 +69,7 @@ def build_dim_ticker(spark: SparkSession, df: DataFrame, gold_dir: str) -> DataF
     )
     out = os.path.join(gold_dir, "dim_ticker")
     dim.write.format("delta").mode("overwrite").save(out)
-    print(f"  dim_ticker (SCD2): {dim.count()} rows -> {out}")
+    logger.info("  dim_ticker (SCD2): %d rows -> %s", dim.count(), out)
     return dim
 
 
@@ -92,7 +87,7 @@ def build_dim_industry(spark: SparkSession, gold_dir: str):
     dim = spark.createDataFrame(rows, ["industry_key", "icb_code", "icb_level", "icb_name"])
     out = os.path.join(gold_dir, "dim_industry")
     dim.write.format("delta").mode("overwrite").save(out)
-    print(f"  dim_industry: {dim.count()} rows -> {out}")
+    logger.info("  dim_industry: %d rows -> %s", dim.count(), out)
 
 
 def build_dim_exchange(spark: SparkSession, gold_dir: str):
@@ -102,7 +97,7 @@ def build_dim_exchange(spark: SparkSession, gold_dir: str):
     dim = spark.createDataFrame(rows, ["exchange_key", "exchange_code", "price_limit_pct"])
     out = os.path.join(gold_dir, "dim_exchange")
     dim.write.format("delta").mode("overwrite").save(out)
-    print(f"  dim_exchange: {dim.count()} rows -> {out}")
+    logger.info("  dim_exchange: %d rows -> %s", dim.count(), out)
 
 
 def build_dim_session(spark: SparkSession, gold_dir: str):
@@ -113,4 +108,4 @@ def build_dim_session(spark: SparkSession, gold_dir: str):
     dim = spark.createDataFrame(rows, ["session_key", "session_type"])
     out = os.path.join(gold_dir, "dim_session")
     dim.write.format("delta").mode("overwrite").save(out)
-    print(f"  dim_session: {dim.count()} rows -> {out}")
+    logger.info("  dim_session: %d rows -> %s", dim.count(), out)

@@ -32,7 +32,8 @@ with DAG(
     GOLD_DIR = os.getenv("GOLD_DIR", "data/gold")
 
     def compute_daily_features(**context):
-        from jobs.gold_model import build_feat_ticker_daily, get_spark
+        from jobs.gold.features import build_feat_ticker_daily
+        from jobs.spark_session import get_spark
 
         spark = get_spark("feat_daily")
         try:
@@ -41,7 +42,8 @@ with DAG(
             spark.stop()
 
     def compute_unified_features(**context):
-        from jobs.gold_model import build_feat_ticker_unified, get_spark
+        from jobs.gold.features import build_feat_ticker_unified
+        from jobs.spark_session import get_spark
 
         spark = get_spark("feat_unified")
         try:
@@ -50,7 +52,8 @@ with DAG(
             spark.stop()
 
     def compute_drift_monitoring(**context):
-        from jobs.drift_monitor import build_agg_feature_health, get_spark
+        from jobs.gold.drift import build_agg_feature_health
+        from jobs.spark_session import get_spark
 
         spark = get_spark("drift_monitor")
         try:
@@ -59,7 +62,8 @@ with DAG(
             spark.stop()
 
     def compute_labels(**context):
-        from jobs.gold_model import build_ml_ticker_label, get_spark
+        from jobs.gold.labels import build_ml_ticker_label
+        from jobs.spark_session import get_spark
 
         spark = get_spark("labels")
         try:
@@ -68,7 +72,8 @@ with DAG(
             spark.stop()
 
     def build_training_table(**context):
-        from jobs.drift_monitor import build_ml_ticker_training, get_spark
+        from jobs.gold.drift import build_ml_ticker_training
+        from jobs.spark_session import get_spark
 
         spark = get_spark("training")
         try:
@@ -81,7 +86,7 @@ with DAG(
     def validate_feature_timestamps(**context):
         from pyspark.sql import functions as F
 
-        from jobs.gold_model import get_spark
+        from jobs.spark_session import get_spark
 
         spark = get_spark("feat_val_ts")
         try:
@@ -102,7 +107,7 @@ with DAG(
     def validate_label_leakage(**context):
         from pyspark.sql import functions as F
 
-        from jobs.gold_model import get_spark
+        from jobs.spark_session import get_spark
 
         spark = get_spark("feat_val_label")
         try:
@@ -118,7 +123,7 @@ with DAG(
             spark.stop()
 
     def validate_drift_alerts(**context):
-        from jobs.gold_model import get_spark
+        from jobs.spark_session import get_spark
 
         spark = get_spark("feat_val_drift")
         try:

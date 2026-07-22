@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "raw_market_events.v1",
+  "description": "Raw market events from Kafka topic stock_market_events — Bronze append-only",
+  "type": "object",
+  "required": ["payload_json", "source_offset", "source_partition", "source_topic", "_ingested_at"],
+  "properties": {
+    "payload_json":     { "type": "string", "description": "Raw JSON event as received from Kafka" },
+    "source_offset":    { "type": "integer" },
+    "source_partition": { "type": "integer" },
+    "source_topic":     { "type": "string" },
+    "kafka_ts":         { "type": "string", "format": "date-time" },
+    "kafka_key":        { "type": ["string", "null"] },
+    "_ingested_at":     { "type": "string", "format": "date-time" }
+  }
+}

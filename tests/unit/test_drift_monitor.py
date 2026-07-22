@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from jobs.drift_monitor import compute_psi
+from jobs.gold.drift import compute_psi
 
 
 class TestComputePsi:

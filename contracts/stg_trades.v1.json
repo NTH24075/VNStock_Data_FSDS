@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "stg_trades.v1",
+  "description": "Deduplicated trade events from silver_stream — grain: one per trade_id",
+  "type": "object",
+  "required": ["event_id", "event_ts", "ticker", "price", "quantity", "trade_id"],
+  "properties": {
+    "event_id":          { "type": "string" },
+    "event_ts":          { "type": "string", "format": "date-time" },
+    "created_ts_parsed": { "type": "string", "format": "date-time" },
+    "session_type":      { "type": "string" },
+    "ticker":            { "type": "string" },
+    "exchange":          { "type": "string" },
+    "price":             { "type": "number", "exclusiveMinimum": 0 },
+    "quantity":          { "type": "integer", "minimum": 1 },
+    "side":              { "type": "string", "enum": ["buy", "sell"] },
+    "trade_id":          { "type": "string" },
+    "source_offset":     { "type": "integer" },
+    "kafka_ts":          { "type": "string", "format": "date-time" },
+    "_ingested_at":      { "type": "string", "format": "date-time" },
+    "_late_flag":        { "type": "boolean" }
+  }
+}

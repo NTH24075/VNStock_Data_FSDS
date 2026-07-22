@@ -4,8 +4,11 @@ Uses vnstock >= 4.0 API (vnstock.api.listing).
 """
 
 import json
+import logging
 from collections import Counter
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 SEED_DIR = Path(__file__).parent
 SEED_FILE = SEED_DIR / "tickers_reference.json"
@@ -42,18 +45,19 @@ def fetch_and_freeze():
             json.dump(records, f, ensure_ascii=False, indent=2)
 
         exch_counts = Counter(r["exchange"] for r in records)
-        print(f"Fetched {len(records)} tickers → {SEED_FILE}")
-        print(f"  By exchange: {dict(exch_counts)}")
+        logger.info("Fetched %d tickers -> %s", len(records), SEED_FILE)
+        logger.info("  By exchange: %s", dict(exch_counts))
 
     except ImportError:
-        print("vnstock not installed. Install with: uv add vnstock")
+        logger.warning("vnstock not installed. Install with: uv add vnstock")
         raise
     except Exception as e:
-        print(f"vnstock fetch failed: {e}")
-        print("Creating empty seed file — fill manually or fix vnstock.")
+        logger.error("vnstock fetch failed: %s", e)
+        logger.warning("Creating empty seed file — fill manually or fix vnstock.")
         with open(SEED_FILE, "w") as f:
             json.dump([], f)
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
     fetch_and_freeze()

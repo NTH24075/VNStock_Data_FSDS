@@ -47,7 +47,8 @@ with DAG(
     def ingest_ohlcv(**context):
         from pyspark.sql import functions as F
 
-        from jobs.bronze_ingest import add_ingest_metadata, get_spark, load_contract, validate_contract
+        from jobs.bronze.offline import add_ingest_metadata, load_contract, validate_contract
+        from jobs.spark_session import get_spark
 
         spark = get_spark("bronze_ohlcv")
         batch_id = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -70,7 +71,8 @@ with DAG(
             spark.stop()
 
     def ingest_foreign_flow(**context):
-        from jobs.bronze_ingest import add_ingest_metadata, get_spark
+        from jobs.bronze.offline import add_ingest_metadata
+        from jobs.spark_session import get_spark
 
         spark = get_spark("bronze_ff")
         batch_id = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -88,7 +90,8 @@ with DAG(
             spark.stop()
 
     def ingest_corporate_actions(**context):
-        from jobs.bronze_ingest import add_ingest_metadata, get_spark
+        from jobs.bronze.offline import add_ingest_metadata
+        from jobs.spark_session import get_spark
 
         spark = get_spark("bronze_ca")
         batch_id = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -106,7 +109,8 @@ with DAG(
             spark.stop()
 
     def ingest_financial_ratios(**context):
-        from jobs.bronze_ingest import add_ingest_metadata, get_spark
+        from jobs.bronze.offline import add_ingest_metadata
+        from jobs.spark_session import get_spark
 
         spark = get_spark("bronze_fr")
         batch_id = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -129,7 +133,8 @@ with DAG(
         import json
         from pathlib import Path
 
-        from jobs.bronze_ingest import get_spark, validate_contract as _validate
+        from jobs.bronze.offline import validate_contract as _validate
+        from jobs.spark_session import get_spark
 
         CONTRACTS_DIR = Path("/opt/airflow/contracts")
         spark = get_spark("bronze_validate_contract")
@@ -152,7 +157,7 @@ with DAG(
             spark.stop()
 
     def validate_quality(**context):
-        from jobs.bronze_ingest import get_spark
+        from jobs.spark_session import get_spark
 
         spark = get_spark("bronze_validate_quality")
         try:

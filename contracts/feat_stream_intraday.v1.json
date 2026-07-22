@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "feat_stream_intraday.v1",
+  "description": "Stream features from feat_stream_job — grain: one per ticker per window",
+  "type": "object",
+  "required": ["ticker_id", "event_timestamp"],
+  "properties": {
+    "ticker_id":                  { "type": "string" },
+    "event_timestamp":            { "type": "string", "format": "date-time" },
+    "created_ts":                 { "type": "string", "format": "date-time" },
+    "f_stream_volume_5m":         { "type": "integer", "minimum": 0 },
+    "f_stream_trade_count_30m":   { "type": "integer", "minimum": 0 }
+  }
+}

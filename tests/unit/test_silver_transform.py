@@ -1,6 +1,6 @@
 import pytest
 
-from jobs.silver_transform import dedup, validate_domain
+from jobs.silver.daily import dedup, validate_domain
 
 
 @pytest.fixture(scope="module")
