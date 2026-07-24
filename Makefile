@@ -1,4 +1,5 @@
-.PHONY: up down build clean test lint generate generate-docker build-images
+.PHONY: up down build clean test lint generate generate-docker build-images \
+	spark-capture-baseline spark-capture-optimized
 
 # =============================================================================
 # uv (fast Python package manager)
@@ -24,7 +25,7 @@ uv-lint:
 # =============================================================================
 
 build-images:
-	docker compose build
+	docker compose build generator airflow-webserver airflow-scheduler flink-jobmanager flink-taskmanager
 
 build-generator:
 	docker compose build generator
@@ -64,15 +65,44 @@ generate-stream:
 generate-all:
 	python -m generator.main --mode all --config config/generator.yaml
 
+sync-gold:
+	docker compose --profile tools run --rm minio-sync-gold
+
 # =============================================================================
 # Testing (M5)
 # =============================================================================
 
 test:
-	pytest tests/ -v --cov=generator --cov=jobs --cov-report=term
+	PYTHONPATH=. .venv/bin/python3.12 -m pytest tests/ -v --cov=generator --cov=jobs --cov-report=term
+
+test-container:
+	@echo "=== Running unit tests in Spark container ==="
+	docker exec vnstock-spark-master bash -c '\
+		export PYTHONPATH=/opt/project ; \
+		cd /opt/project ; \
+		python3 -m pytest tests/unit/ -v'
+
+test-container-all: test-container
+	@echo "=== Running integration tests ==="
+	docker exec vnstock-spark-master bash -c '\
+		export PYTHONPATH=/opt/project ; \
+		cd /opt/project ; \
+		python3 -m pytest tests/integration/ -v'
 
 test-coverage:
 	pytest tests/ -v --cov=generator --cov=jobs --cov-report=html
+
+# =============================================================================
+# Spark UI evidence capture
+# =============================================================================
+
+spark-capture-baseline:
+	SPARK_CAPTURE_MODE=baseline docker compose --profile capture run --rm \
+		--service-ports --use-aliases spark-capture
+
+spark-capture-optimized:
+	SPARK_CAPTURE_MODE=optimized docker compose --profile capture run --rm \
+		--service-ports --use-aliases spark-capture
 
 # =============================================================================
 # Linting
@@ -89,10 +119,29 @@ format:
 # =============================================================================
 
 airflow-init:
-	docker compose run --rm airflow-webserver airflow db init
+	docker compose run --rm airflow-webserver airflow db migrate
 	docker compose run --rm airflow-webserver airflow users create \
 		--username admin --password admin --firstname Admin --lastname User \
 		--role Admin --email admin@example.com
+
+# =============================================================================
+# Flink (PyFlink streaming jobs)
+# =============================================================================
+
+build-flink:
+	docker compose build flink-jobmanager flink-taskmanager
+
+flink-submit:
+	docker exec vnstock-flink-jobmanager flink run -py /opt/project/jobs/flink/silver_stream.py
+
+flink-list:
+	docker exec vnstock-flink-jobmanager flink list
+
+flink-cancel:
+	docker exec vnstock-flink-jobmanager flink cancel $(JOB_ID)
+
+flink-ui:
+	@echo "Flink Dashboard → http://localhost:8081"
 
 # =============================================================================
 # Clean

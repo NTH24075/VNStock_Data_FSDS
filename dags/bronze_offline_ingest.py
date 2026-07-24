@@ -1,3 +1,5 @@
+"""Airflow DP1 DAG: ingest and validate all offline vendor sources."""
+
 # =============================================================================
 # Airflow DAG: Bronze Offline Ingestion (DP1)
 # =============================================================================
@@ -10,9 +12,9 @@
 # Based on schema_design.md, pipeline 1.
 # =============================================================================
 
-import glob
 import os
 from datetime import datetime, timedelta
+from urllib.parse import urlparse
 
 from airflow import DAG
 from airflow.operators.python import PythonOperator
@@ -29,22 +31,36 @@ with DAG(
     start_date=datetime(2025, 7, 1),
     schedule_interval="30 15 * * *",
     catchup=False,
+    max_active_tasks=1,
     tags=["bronze", "offline", "dp1"],
 ) as dag:
-
     DATA_DIR = os.getenv("DATA_DIR", "data/landing")
     BRONZE_DIR = os.getenv("BRONZE_DIR", "data/bronze")
 
     def _read_landing(spark, table_name):
-        pattern = os.path.join(DATA_DIR, "run_date=*", table_name, "*.parquet")
-        files = glob.glob(pattern)
-        if not files:
-            raise FileNotFoundError(f"No Parquet files found: {pattern}")
-        return spark.read.parquet(*files)
+        """Read flat or Hive-partitioned vendor drops recursively."""
+        from jobs.bronze.offline import read_landing_parquet
+
+        return read_landing_parquet(spark, DATA_DIR, table_name)
+
+    def _postgres_jdbc_options():
+        """Convert the configured SQLAlchemy-style DSN into JDBC options."""
+        dsn = urlparse(
+            os.getenv(
+                "POSTGRES_DSN",
+                "postgresql://vendor:vendor@postgres:5432/vendor_db",
+            )
+        )
+        return {
+            "url": f"jdbc:postgresql://{dsn.hostname}:{dsn.port or 5432}{dsn.path}",
+            "user": dsn.username or "vendor",
+            "password": dsn.password or "vendor",
+        }
 
     # === Ingest stage ===
 
     def ingest_ohlcv(**context):
+        """Validate and ingest physical OHLCV schema versions."""
         from pyspark.sql import functions as F
 
         from jobs.bronze.offline import add_ingest_metadata, load_contract, validate_contract
@@ -65,12 +81,18 @@ with DAG(
                 validate_contract(df_v, contract, v)
                 df_v = add_ingest_metadata(df_v, batch_id, v)
                 out_path = os.path.join(BRONZE_DIR, f"raw_ohlcv_daily_v{v}")
-                df_v.write.format("delta").mode("overwrite").save(out_path)
+                (
+                    df_v.write.format("delta")
+                    .mode("overwrite")
+                    .option("overwriteSchema", "true")
+                    .save(out_path)
+                )
                 print(f"  Wrote v{v}: {cnt} rows -> {out_path}")
         finally:
             spark.stop()
 
     def ingest_foreign_flow(**context):
+        """Ingest daily foreign-flow Parquet into Bronze."""
         from jobs.bronze.offline import add_ingest_metadata
         from jobs.spark_session import get_spark
 
@@ -82,7 +104,12 @@ with DAG(
             print(f"  Read {df.count()} rows, columns: {df.columns}")
             df = add_ingest_metadata(df, batch_id, 1)
             out_path = os.path.join(BRONZE_DIR, "raw_foreign_flow")
-            df.write.format("delta").mode("overwrite").save(out_path)
+            (
+                df.write.format("delta")
+                .mode("overwrite")
+                .option("overwriteSchema", "true")
+                .save(out_path)
+            )
             print(f"  Wrote {df.count()} rows -> {out_path}")
         except FileNotFoundError as e:
             print(f"  Skipping foreign_flow_daily: {e}")
@@ -90,25 +117,90 @@ with DAG(
             spark.stop()
 
     def ingest_corporate_actions(**context):
+        """Extract corporate actions from vendor PostgreSQL via JDBC."""
         from jobs.bronze.offline import add_ingest_metadata
         from jobs.spark_session import get_spark
 
         spark = get_spark("bronze_ca")
         batch_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         try:
-            print("\n=== Bronze: raw_corporate_actions ===")
-            df = _read_landing(spark, "corporate_actions")
-            print(f"  Read {df.count()} rows, columns: {df.columns}")
+            print("\n=== Bronze: raw_corporate_actions (JDBC from vendor_db) ===")
+            jdbc = _postgres_jdbc_options()
+            df = (
+                spark.read.format("jdbc")
+                .option("url", jdbc["url"])
+                .option("dbtable", "corporate_actions")
+                .option("user", jdbc["user"])
+                .option("password", jdbc["password"])
+                .option("driver", "org.postgresql.Driver")
+                .load()
+            )
+            print(
+                f"  Read {df.count()} rows from vendor_db.corporate_actions, columns: {df.columns}"
+            )
             df = add_ingest_metadata(df, batch_id, 1)
             out_path = os.path.join(BRONZE_DIR, "raw_corporate_actions")
-            df.write.format("delta").mode("overwrite").save(out_path)
+            (
+                df.write.format("delta")
+                .mode("overwrite")
+                .option("overwriteSchema", "true")
+                .save(out_path)
+            )
             print(f"  Wrote {df.count()} rows -> {out_path}")
-        except FileNotFoundError as e:
-            print(f"  Skipping corporate_actions: {e}")
+        except Exception as e:
+            print(f"  JDBC corporate_actions failed, falling back to Parquet: {e}")
+            try:
+                df = _read_landing(spark, "corporate_actions")
+                df = add_ingest_metadata(df, batch_id, 1)
+                out_path = os.path.join(BRONZE_DIR, "raw_corporate_actions")
+                (
+                    df.write.format("delta")
+                    .mode("overwrite")
+                    .option("overwriteSchema", "true")
+                    .save(out_path)
+                )
+                print(f"  Fallback Parquet: {df.count()} rows -> {out_path}")
+            except FileNotFoundError as e2:
+                print(f"  Skipping corporate_actions: {e2}")
+        finally:
+            spark.stop()
+
+    def ingest_tickers_jdbc(**context):
+        """Extract ticker references from vendor PostgreSQL via JDBC."""
+        from jobs.bronze.offline import add_ingest_metadata
+        from jobs.spark_session import get_spark
+
+        spark = get_spark("bronze_tickers")
+        batch_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        try:
+            print("\n=== Bronze: raw_tickers (JDBC from vendor_db) ===")
+            jdbc = _postgres_jdbc_options()
+            df = (
+                spark.read.format("jdbc")
+                .option("url", jdbc["url"])
+                .option("dbtable", "tickers")
+                .option("user", jdbc["user"])
+                .option("password", jdbc["password"])
+                .option("driver", "org.postgresql.Driver")
+                .load()
+            )
+            print(f"  Read {df.count()} rows from vendor_db.tickers, columns: {df.columns}")
+            df = add_ingest_metadata(df, batch_id, 1)
+            out_path = os.path.join(BRONZE_DIR, "raw_tickers")
+            (
+                df.write.format("delta")
+                .mode("overwrite")
+                .option("overwriteSchema", "true")
+                .save(out_path)
+            )
+            print(f"  Wrote {df.count()} rows -> {out_path}")
+        except Exception as e:
+            print(f"  JDBC tickers failed: {e}")
         finally:
             spark.stop()
 
     def ingest_financial_ratios(**context):
+        """Ingest quarterly financial-ratio Parquet into Bronze."""
         from jobs.bronze.offline import add_ingest_metadata
         from jobs.spark_session import get_spark
 
@@ -120,7 +212,12 @@ with DAG(
             print(f"  Read {df.count()} rows, columns: {df.columns}")
             df = add_ingest_metadata(df, batch_id, 1)
             out_path = os.path.join(BRONZE_DIR, "raw_financial_ratios")
-            df.write.format("delta").mode("overwrite").save(out_path)
+            (
+                df.write.format("delta")
+                .mode("overwrite")
+                .option("overwriteSchema", "true")
+                .save(out_path)
+            )
             print(f"  Wrote {df.count()} rows -> {out_path}")
         except FileNotFoundError as e:
             print(f"  Skipping financial_ratios: {e}")
@@ -130,22 +227,28 @@ with DAG(
     # === Validate stage ===
 
     def validate_contract(**context):
+        """Revalidate Bronze schemas against registered JSON contracts."""
         import json
         from pathlib import Path
 
         from jobs.bronze.offline import validate_contract as _validate
         from jobs.spark_session import get_spark
 
-        CONTRACTS_DIR = Path("/opt/airflow/contracts")
+        contracts_dir = Path(os.getenv("CONTRACTS_DIR", "/opt/project/contracts"))
         spark = get_spark("bronze_validate_contract")
         try:
-            for table_base, versions in [("raw_ohlcv_daily", [1, 2]),
-                                          ("raw_foreign_flow", [1]),
-                                          ("raw_corporate_actions", [1]),
-                                          ("raw_financial_ratios", [1])]:
+            for table_base, versions in [
+                ("raw_ohlcv_daily", [1, 2]),
+                ("raw_foreign_flow", [1]),
+                ("raw_corporate_actions", [1]),
+                ("raw_financial_ratios", [1]),
+            ]:
                 for v in versions:
-                    path = os.path.join(BRONZE_DIR, f"{table_base}_v{v}" if table_base == "raw_ohlcv_daily" else table_base)
-                    contract_path = CONTRACTS_DIR / f"{table_base}.v{v}.json"
+                    path = os.path.join(
+                        BRONZE_DIR,
+                        f"{table_base}_v{v}" if table_base == "raw_ohlcv_daily" else table_base,
+                    )
+                    contract_path = contracts_dir / f"{table_base}.v{v}.json"
                     if not os.path.exists(path):
                         continue
                     df = spark.read.format("delta").load(path)
@@ -157,17 +260,23 @@ with DAG(
             spark.stop()
 
     def validate_quality(**context):
+        """Run row-count and required-key Bronze quality gates."""
         from jobs.spark_session import get_spark
 
         spark = get_spark("bronze_validate_quality")
         try:
             print("=== Quality Checks ===")
-            for table_base, versions in [("raw_ohlcv_daily", [1, 2]),
-                                          ("raw_foreign_flow", [1]),
-                                          ("raw_corporate_actions", [1]),
-                                          ("raw_financial_ratios", [1])]:
+            for table_base, versions in [
+                ("raw_ohlcv_daily", [1, 2]),
+                ("raw_foreign_flow", [1]),
+                ("raw_corporate_actions", [1]),
+                ("raw_financial_ratios", [1]),
+            ]:
                 for v in versions:
-                    path = os.path.join(BRONZE_DIR, f"{table_base}_v{v}" if table_base == "raw_ohlcv_daily" else table_base)
+                    path = os.path.join(
+                        BRONZE_DIR,
+                        f"{table_base}_v{v}" if table_base == "raw_ohlcv_daily" else table_base,
+                    )
                     if not os.path.exists(path):
                         continue
                     df = spark.read.format("delta").load(path)
@@ -184,12 +293,27 @@ with DAG(
     # Ingest tasks
     t_ingest_ohlcv = PythonOperator(task_id="ingest_ohlcv", python_callable=ingest_ohlcv)
     t_ingest_ff = PythonOperator(task_id="ingest_foreign_flow", python_callable=ingest_foreign_flow)
-    t_ingest_ca = PythonOperator(task_id="ingest_corporate_actions", python_callable=ingest_corporate_actions)
-    t_ingest_fr = PythonOperator(task_id="ingest_financial_ratios", python_callable=ingest_financial_ratios)
+    t_ingest_ca = PythonOperator(
+        task_id="ingest_corporate_actions", python_callable=ingest_corporate_actions
+    )
+    t_ingest_fr = PythonOperator(
+        task_id="ingest_financial_ratios", python_callable=ingest_financial_ratios
+    )
+    t_ingest_tickers = PythonOperator(
+        task_id="ingest_tickers_jdbc", python_callable=ingest_tickers_jdbc
+    )
 
     # Validate tasks
-    t_validate_contract = PythonOperator(task_id="validate_contract", python_callable=validate_contract)
-    t_validate_quality = PythonOperator(task_id="validate_quality", python_callable=validate_quality)
+    t_validate_contract = PythonOperator(
+        task_id="validate_contract", python_callable=validate_contract
+    )
+    t_validate_quality = PythonOperator(
+        task_id="validate_quality", python_callable=validate_quality
+    )
 
-    # DAG structure: Ingest → Validate
-    [t_ingest_ohlcv, t_ingest_ff, t_ingest_ca, t_ingest_fr] >> t_validate_contract >> t_validate_quality
+    # DAG structure: Ingest → Validate (tickers + corporate_actions via JDBC, rest via Parquet)
+    (
+        [t_ingest_ohlcv, t_ingest_ff, t_ingest_ca, t_ingest_fr, t_ingest_tickers]
+        >> t_validate_contract
+        >> t_validate_quality
+    )

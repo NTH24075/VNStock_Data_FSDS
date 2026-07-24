@@ -3,7 +3,7 @@
 # =============================================================================
 # Custom images (built from source):
 #   - generator:          Python + vnstock + deps (./Dockerfile)
-#   - spark-master/worker: bitnami/spark + delta-spark + pandas (docker/spark/)
+#   - spark-master/worker: Apache Spark + Delta + pandas (docker/spark/)
 #   - airflow-*:          apache/airflow + pyspark + deps (docker/airflow/)
 #
 # Off-the-shelf images (no custom code):
@@ -19,6 +19,8 @@ x-common-env: &common-env
   MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
   AWS_REGION: us-east-1
   POSTGRES_DSN: "postgresql://vendor:vendor@postgres:5432/vendor_db"
+  KAFKA_BROKER: "kafka:29092"
+  KAFKA_TOPIC: "stock_market_events_v3"
 
 services:
   # ===========================================================================
@@ -73,6 +75,21 @@ services:
       mc mb --ignore-existing local/delta-lake;
       "
 
+  minio-sync-gold:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    volumes:
+      - ./data/gold:/source:ro
+    entrypoint: |
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${MINIO_ACCESS_KEY:-minioadmin} ${MINIO_SECRET_KEY:-minioadmin};
+      mc mirror --overwrite --exclude '_checkpoints/*' --exclude '*.crc' /source local/delta-lake/gold;
+      "
+    profiles:
+      - tools
+
   kafka:
     image: confluentinc/cp-kafka:7.6.0
     container_name: vnstock-kafka
@@ -81,14 +98,17 @@ services:
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
     ports:
       - "9092:9092"
     healthcheck:
-      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:29092"]
       interval: 10s
       timeout: 10s
       retries: 5
@@ -121,6 +141,7 @@ services:
         condition: service_healthy
     volumes:
       - ./data:/app/data
+      - ./docs/evidence:/app/docs/evidence
     profiles:
       - generator
 
@@ -129,20 +150,32 @@ services:
   # ===========================================================================
 
   spark-master:
-    image: apache/spark:3.5.0
+    build:
+      context: ./docker/spark
+      dockerfile: Dockerfile
+    image: vnstock-spark:3.5.3
     container_name: vnstock-spark-master
     command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master --host spark-master
     environment:
       SPARK_NO_DAEMONIZE: "true"
+      PYTHONPATH: /opt/project:/opt/spark/python/lib/pyspark.zip:/opt/spark/python/lib/py4j-0.10.9.7-src.zip
     ports:
       - "8080:8080"
       - "7077:7077"
     volumes:
-      - ./jobs:/opt/jobs
-      - ./config:/opt/config
+      - ./jobs:/opt/project/jobs
+      - ./generator:/opt/project/generator
+      - ./tests:/opt/project/tests
+      - ./config:/opt/project/config
+      - ./data:/opt/project/data
+      - ./contracts:/opt/project/contracts
+      - ./generator/seed:/opt/project/generator/seed
 
   spark-worker:
-    image: apache/spark:3.5.0
+    build:
+      context: ./docker/spark
+      dockerfile: Dockerfile
+    image: vnstock-spark:3.5.3
     container_name: vnstock-spark-worker
     depends_on:
       - spark-master
@@ -151,23 +184,73 @@ services:
       SPARK_NO_DAEMONIZE: "true"
       SPARK_WORKER_CORES: 2
       SPARK_WORKER_MEMORY: 4G
+      PYTHONPATH: /opt/project:/opt/spark/python/lib/pyspark.zip:/opt/spark/python/lib/py4j-0.10.9.7-src.zip
     volumes:
-      - ./jobs:/opt/jobs
-      - ./config:/opt/config
+      - ./jobs:/opt/project/jobs
+      - ./generator:/opt/project/generator
+      - ./tests:/opt/project/tests
+      - ./config:/opt/project/config
+      - ./data:/opt/project/data
+      - ./contracts:/opt/project/contracts
+      - ./generator/seed:/opt/project/generator/seed
+
+  # Standalone Spark driver used only for reproducible baseline/optimized UI
+  # evidence. Start it through the Make targets below; the "capture" profile
+  # keeps port 4040 free during normal pipeline operation.
+  spark-capture:
+    build:
+      context: ./docker/spark
+      dockerfile: Dockerfile
+    image: vnstock-spark:3.5.3
+    depends_on:
+      - spark-master
+      - spark-worker
+    environment:
+      PYTHONPATH: /opt/project:/opt/spark/python/lib/pyspark.zip:/opt/spark/python/lib/py4j-0.10.9.7-src.zip
+      SPARK_MASTER_URL: spark://spark-master:7077
+      SPARK_DRIVER_HOST: spark-capture
+      DATA_ROOT: /opt/project/data
+    ports:
+      - "4040:4040"
+    volumes:
+      - ./jobs:/opt/project/jobs
+      - ./scripts:/opt/project/scripts
+      - ./data:/opt/project/data
+    command:
+      - python3
+      - /opt/project/scripts/spark_ui_capture.py
+      - --mode
+      - ${SPARK_CAPTURE_MODE:-baseline}
+      - --hold-seconds
+      - ${SPARK_CAPTURE_HOLD_SECONDS:-600}
+      - --scale
+      - ${SPARK_CAPTURE_SCALE:-4}
+    profiles:
+      - capture
 
   flink-jobmanager:
-    image: flink:1.18-scala_2.12
+    build:
+      context: ./docker/flink
+      dockerfile: Dockerfile
+    image: vnstock-flink:latest
     container_name: vnstock-flink-jobmanager
     command: jobmanager
     environment:
       - JOB_MANAGER_RPC_ADDRESS=flink-jobmanager
+      - KAFKA_BROKER=kafka:29092
+      - KAFKA_TOPIC=stock_market_events_v3
+      - FLINK_OUTPUT_DIR=/opt/flink/data
     ports:
       - "8081:8081"
     volumes:
-      - ./jobs:/opt/jobs
+      - ./jobs:/opt/project/jobs
+      - ./data/flink:/opt/flink/data
 
   flink-taskmanager:
-    image: flink:1.18-scala_2.12
+    build:
+      context: ./docker/flink
+      dockerfile: Dockerfile
+    image: vnstock-flink:latest
     container_name: vnstock-flink-taskmanager
     depends_on:
       - flink-jobmanager
@@ -176,7 +259,8 @@ services:
       - JOB_MANAGER_RPC_ADDRESS=flink-jobmanager
       - TASK_MANAGER_NUMBER_OF_TASK_SLOTS=4
     volumes:
-      - ./jobs:/opt/jobs
+      - ./jobs:/opt/project/jobs
+      - ./data/flink:/opt/flink/data
 
   # ===========================================================================
   # Orchestration
@@ -188,28 +272,35 @@ services:
       dockerfile: Dockerfile
     image: vnstock-airflow:latest
     container_name: vnstock-airflow-webserver
+    # Match the Spark UID so both runtimes can safely update shared Delta paths.
+    # The official Airflow image supports an arbitrary UID when the group is 0.
+    user: "185:0"
     depends_on:
       postgres:
         condition: service_healthy
     environment:
       <<: *common-env
+      PYTHONPATH: /opt/project:/opt/airflow/dags
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__PARALLELISM: "1"
+      AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: "1"
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: "postgresql+psycopg2://vendor:vendor@postgres/vendor_db"
-      CONTRACTS_DIR: /opt/airflow/contracts
-      SEED_PATH: /opt/airflow/seed/tickers_reference.json
-      BRONZE_DIR: /opt/airflow/data/bronze
-      SILVER_DIR: /opt/airflow/data/silver
-      GOLD_DIR: /opt/airflow/data/gold
-      DATA_DIR: /opt/airflow/data/landing
+      CONTRACTS_DIR: /opt/project/contracts
+      SEED_PATH: /opt/project/generator/seed/tickers_reference.json
+      BRONZE_DIR: /opt/project/data/bronze
+      SILVER_DIR: /opt/project/data/silver
+      GOLD_DIR: /opt/project/data/gold
+      DATA_DIR: /opt/project/data/landing
+      SPARK_MASTER_URL: spark://spark-master:7077
     ports:
       - "8082:8080"
     volumes:
       - ./dags:/opt/airflow/dags
-      - ./jobs:/opt/airflow/jobs
-      - ./config:/opt/airflow/config
-      - ./contracts:/opt/airflow/contracts
-      - ./generator/seed:/opt/airflow/seed
-      - ./data:/opt/airflow/data
+      - ./jobs:/opt/project/jobs
+      - ./config:/opt/project/config
+      - ./contracts:/opt/project/contracts
+      - ./generator/seed:/opt/project/generator/seed
+      - ./data:/opt/project/data
     command: webserver
 
   airflow-scheduler:
@@ -218,31 +309,48 @@ services:
       dockerfile: Dockerfile
     image: vnstock-airflow:latest
     container_name: vnstock-airflow-scheduler
+    user: "185:0"
     depends_on:
       postgres:
         condition: service_healthy
     environment:
       <<: *common-env
+      PYTHONPATH: /opt/project:/opt/airflow/dags
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__PARALLELISM: "1"
+      AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: "1"
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: "postgresql+psycopg2://vendor:vendor@postgres/vendor_db"
-      CONTRACTS_DIR: /opt/airflow/contracts
-      SEED_PATH: /opt/airflow/seed/tickers_reference.json
-      BRONZE_DIR: /opt/airflow/data/bronze
-      SILVER_DIR: /opt/airflow/data/silver
-      GOLD_DIR: /opt/airflow/data/gold
-      DATA_DIR: /opt/airflow/data/landing
+      CONTRACTS_DIR: /opt/project/contracts
+      SEED_PATH: /opt/project/generator/seed/tickers_reference.json
+      BRONZE_DIR: /opt/project/data/bronze
+      SILVER_DIR: /opt/project/data/silver
+      GOLD_DIR: /opt/project/data/gold
+      DATA_DIR: /opt/project/data/landing
+      SPARK_MASTER_URL: spark://spark-master:7077
     volumes:
       - ./dags:/opt/airflow/dags
-      - ./jobs:/opt/airflow/jobs
-      - ./config:/opt/airflow/config
-      - ./contracts:/opt/airflow/contracts
-      - ./generator/seed:/opt/airflow/seed
-      - ./data:/opt/airflow/data
+      - ./jobs:/opt/project/jobs
+      - ./config:/opt/project/config
+      - ./contracts:/opt/project/contracts
+      - ./generator/seed:/opt/project/generator/seed
+      - ./data:/opt/project/data
     command: scheduler
 
   # ===========================================================================
   # Query Engine
   # ===========================================================================
+
+  hive-metastore:
+    image: apache/hive:4.0.1
+    container_name: vnstock-hive-metastore
+    environment:
+      SERVICE_NAME: metastore
+      HADOOP_CLASSPATH: /opt/hadoop/share/hadoop/tools/lib/hadoop-aws-3.3.6.jar:/opt/hadoop/share/hadoop/tools/lib/aws-java-sdk-bundle-1.12.367.jar
+    volumes:
+      - hive_metastore_data:/opt/hive/data/warehouse
+      - ./docker/hive/hive-site.xml:/opt/hive/conf/hive-site.xml:ro
+    ports:
+      - "9083:9083"
 
   trino:
     image: trinodb/trino:latest
@@ -255,3 +363,4 @@ services:
 volumes:
   postgres_data:
   minio_data:
+  hive_metastore_data:

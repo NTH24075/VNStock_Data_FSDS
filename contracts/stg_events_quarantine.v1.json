@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "stg_events_quarantine.v1",
+  "description": "Stream events that arrived beyond the 60s watermark — side-output from silver_stream before downstream processing",
+  "type": "object",
+  "required": ["event_id", "event_type", "event_ts"],
+  "properties": {
+    "event_id":          { "type": "string" },
+    "event_type":        { "type": "string", "enum": ["trade", "quote", "index_update"] },
+    "event_ts":          { "type": "string", "format": "date-time" },
+    "created_ts_parsed": { "type": "string", "format": "date-time" },
+    "session_type":      { "type": "string" },
+    "ticker":            { "type": ["string", "null"] },
+    "exchange":          { "type": "string" },
+    "source_offset":     { "type": "integer" },
+    "kafka_ts":          { "type": "string", "format": "date-time" },
+    "_ingested_at":      { "type": "string", "format": "date-time" }
+  }
+}

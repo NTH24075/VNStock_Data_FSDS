@@ -3,12 +3,13 @@
 import argparse
 import logging
 import os
-from datetime import datetime
+from datetime import date, datetime
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
-
-from pyspark.sql import DataFrame, SparkSession
+import yaml
+from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 
 from jobs.spark_session import get_spark
@@ -16,7 +17,35 @@ from jobs.spark_session import get_spark
 logger = logging.getLogger(__name__)
 
 
+def load_drift_start_date(
+    config_path: str = "config/drift.yaml",
+    default: str = "2025-09-01",
+) -> date:
+    """Read the configured regime-change date used by the data generator."""
+    configured = os.getenv("DRIFT_START_DATE")
+    path = Path(config_path)
+    if configured is None and path.exists():
+        with path.open(encoding="utf-8") as file_handle:
+            config = yaml.safe_load(file_handle) or {}
+        configured = config.get("drift_start_date")
+    return date.fromisoformat(str(configured or default))
+
+
+def monitoring_windows(
+    dates: list[date],
+    drift_start_date: date,
+    baseline_size: int = 30,
+    stride: int = 10,
+) -> tuple[list[date], list[date]]:
+    """Return the pre-drift baseline and sampled post-drift monitoring dates."""
+    pre_drift = [value for value in sorted(dates) if value < drift_start_date]
+    baseline = pre_drift[-baseline_size:]
+    post_drift = [value for value in sorted(dates) if value >= drift_start_date]
+    return baseline, post_drift[::stride]
+
+
 def compute_psi(expected: pd.Series, actual: pd.Series, bins: int = 10) -> float:
+    """Calculate population stability index over shared histogram bins."""
     combined = pd.concat([expected.dropna(), actual.dropna()])
     if len(combined) < bins * 2:
         return 0.0
@@ -33,7 +62,12 @@ def compute_psi(expected: pd.Series, actual: pd.Series, bins: int = 10) -> float
     return float(max(0, psi))
 
 
-def build_agg_feature_health(spark: SparkSession, gold_dir: str):
+def build_agg_feature_health(
+    spark: SparkSession,
+    gold_dir: str,
+    drift_start_date: date | None = None,
+):
+    """Aggregate feature statistics and PSI values by monitoring date."""
     feat_path = os.path.join(gold_dir, "feat_ticker_daily")
     if not os.path.exists(feat_path):
         logger.info("  No feature data — skipping feature health")
@@ -46,11 +80,25 @@ def build_agg_feature_health(spark: SparkSession, gold_dir: str):
         return
 
     fact = spark.read.format("delta").load(fact_path)
-    dates = sorted([r.trade_date for r in fact.select("trade_date").distinct().orderBy("trade_date").collect()])
-    baseline_dates = set(dates[:30])
+    dates = sorted(
+        [r.trade_date for r in fact.select("trade_date").distinct().orderBy("trade_date").collect()]
+    )
+    drift_start_date = drift_start_date or load_drift_start_date()
+    baseline, monitoring_dates = monitoring_windows(dates, drift_start_date)
+    baseline_dates = set(baseline)
+    if len(baseline) < 30 or not monitoring_dates:
+        logger.info(
+            "  Need 30 pre-drift dates and post-drift observations — "
+            "found %d baseline, %d monitoring dates",
+            len(baseline),
+            len(monitoring_dates),
+        )
+        return
 
     feature_cols = [
-        "f_ticker_return_5d", "f_ticker_volatility_20d", "f_ticker_ma20_gap",
+        "f_ticker_return_5d",
+        "f_ticker_volatility_20d",
+        "f_ticker_ma20_gap",
     ]
 
     feat_pd = feat_df.toPandas()
@@ -63,19 +111,29 @@ def build_agg_feature_health(spark: SparkSession, gold_dir: str):
         if len(baseline_vals.dropna()) < 10:
             continue
 
-        post_dates = [d for d in dates if d not in baseline_dates]
-        for td in post_dates[::10]:
+        rows.append(
+            {
+                "monitoring_date": baseline[-1],
+                "feature_name": feature,
+                "mean_value": round(baseline_vals.mean(), 6),
+                "psi_vs_baseline": 0.0,
+                "alert_flag": False,
+            }
+        )
+        for td in monitoring_dates:
             day_vals = feat_pd[feat_pd["trade_date"] == td][feature]
             if len(day_vals.dropna()) < 10:
                 continue
             psi = compute_psi(baseline_vals, day_vals)
-            rows.append({
-                "monitoring_date": td,
-                "feature_name": feature,
-                "mean_value": round(day_vals.mean(), 6),
-                "psi_vs_baseline": round(psi, 4),
-                "alert_flag": psi > 0.15,
-            })
+            rows.append(
+                {
+                    "monitoring_date": td,
+                    "feature_name": feature,
+                    "mean_value": round(day_vals.mean(), 6),
+                    "psi_vs_baseline": round(psi, 4),
+                    "alert_flag": psi > 0.15,
+                }
+            )
 
     if not rows:
         logger.info("  Not enough data for feature health — skipping")
@@ -84,30 +142,48 @@ def build_agg_feature_health(spark: SparkSession, gold_dir: str):
     health_pd = pd.DataFrame(rows)
     health = spark.createDataFrame(health_pd)
     out = os.path.join(gold_dir, "agg_feature_health_daily")
-    health.write.format("delta").mode("overwrite").save(out)
+    (
+        health.write.format("delta")
+        .mode("overwrite")
+        .option("overwriteSchema", "true")
+        .save(out)
+    )
 
     alerts = health_pd[health_pd["alert_flag"]]
     n_alerts = len(alerts)
-    logger.info("  agg_feature_health_daily: %d rows, %d alerts -> %s", len(health_pd), n_alerts, out)
+    logger.info(
+        "  agg_feature_health_daily: %d rows, %d alerts -> %s", len(health_pd), n_alerts, out
+    )
 
     if n_alerts > 0:
-        alert_pd = pd.DataFrame({
-            "alert_date": [datetime.now().date()] * n_alerts,
-            "feature_name": alerts["feature_name"].values,
-            "psi_value": alerts["psi_vs_baseline"].values,
-            "action": ["Volatility regime shift suspected; evaluate model performance"] * n_alerts,
-        })
+        alert_pd = pd.DataFrame(
+            {
+                "alert_date": [datetime.now().date()] * n_alerts,
+                "feature_name": alerts["feature_name"].values,
+                "psi_value": alerts["psi_vs_baseline"].values,
+                "action": ["Volatility regime shift suspected; evaluate model performance"]
+                * n_alerts,
+            }
+        )
         alert_df = spark.createDataFrame(alert_pd)
         alert_out = os.path.join(gold_dir, "feature_drift_alerts")
-        alert_df.write.format("delta").mode("overwrite").save(alert_out)
+        (
+            alert_df.write.format("delta")
+            .mode("overwrite")
+            .option("overwriteSchema", "true")
+            .save(alert_out)
+        )
         logger.info("  feature_drift_alerts: %d rows -> %s", n_alerts, alert_out)
 
     return health
 
 
 def build_ml_ticker_training(spark: SparkSession, gold_dir: str):
+    """Join point-in-time unified features with their future labels."""
     label_path = os.path.join(gold_dir, "ml_ticker_label")
-    feat_path = os.path.join(gold_dir, "feat_ticker_daily")
+    feat_path = os.path.join(gold_dir, "feat_ticker_unified")
+    if not os.path.exists(feat_path):
+        feat_path = os.path.join(gold_dir, "feat_ticker_daily")
 
     if not os.path.exists(label_path) or not os.path.exists(feat_path):
         logger.info("  Missing label or feature data — skipping training table")
@@ -116,20 +192,30 @@ def build_ml_ticker_training(spark: SparkSession, gold_dir: str):
     labels = spark.read.format("delta").load(label_path)
     feats = spark.read.format("delta").load(feat_path)
 
-    training = labels.join(feats, on=["ticker_id", "trade_date"], how="inner")
+    training = labels.join(
+        feats.drop("event_timestamp", "created_ts"), on=["ticker_id", "trade_date"], how="inner"
+    )
 
     feat_cols = [c for c in feats.columns if c.startswith("f_")]
     select_cols = ["ticker_id", "trade_date", "event_timestamp", "created_ts", "label"] + feat_cols
     result = training.select(*select_cols)
 
     out = os.path.join(gold_dir, "ml_ticker_training")
-    result.write.format("delta").mode("overwrite").save(out)
+    (
+        result.write.format("delta")
+        .mode("overwrite")
+        .option("overwriteSchema", "true")
+        .save(out)
+    )
 
     pos_rate = result.filter(F.col("label") == 1).count() / max(result.count(), 1) * 100
-    logger.info("  ml_ticker_training: %d rows, positive rate=%.1f%% -> %s", result.count(), pos_rate, out)
+    logger.info(
+        "  ml_ticker_training: %d rows, positive rate=%.1f%% -> %s", result.count(), pos_rate, out
+    )
 
 
 def generate_drift_report(spark: SparkSession, gold_dir: str):
+    """Export feature-health rows with reviewer-friendly drift statuses."""
     health_path = os.path.join(gold_dir, "agg_feature_health_daily")
     if not os.path.exists(health_path):
         return
@@ -137,6 +223,7 @@ def generate_drift_report(spark: SparkSession, gold_dir: str):
     report_pd = health.toPandas()
 
     def drift_status(psi):
+        """Map PSI to the configured severity band."""
         if psi < 0.05:
             return "baseline"
         elif psi < 0.15:
@@ -146,12 +233,19 @@ def generate_drift_report(spark: SparkSession, gold_dir: str):
         return "alert"
 
     report_pd["drift_status"] = report_pd["psi_vs_baseline"].apply(drift_status)
-    out = "data/drift_validation_report.csv"
+    out = Path(
+        os.getenv(
+            "DRIFT_REPORT_PATH",
+            str(Path(gold_dir) / "drift_validation_report.csv"),
+        )
+    )
+    out.parent.mkdir(parents=True, exist_ok=True)
     report_pd.to_csv(out, index=False)
     logger.info("Drift validation report -> %s", out)
 
 
 def main():
+    """Run drift aggregation, training-table build, and CSV export."""
     parser = argparse.ArgumentParser(description="Drift monitoring and training table")
     parser.add_argument("--gold-dir", default="data/gold")
     args = parser.parse_args()

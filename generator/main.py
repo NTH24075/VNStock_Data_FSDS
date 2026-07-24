@@ -10,14 +10,11 @@ import argparse
 import json
 import logging
 import os
-import sys
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 import yaml
 
-from generator.calendar import generate_trading_calendar
 from generator.generators import Generator
 from generator.problems import (
     apply_volume_skew,
@@ -28,22 +25,32 @@ from generator.problems import (
 from generator.writers import (
     generate_quality_report,
     write_jsonl,
+    write_ohlcv_landing,
     write_parquet_landing,
-    write_to_postgres,
     write_to_kafka,
+    write_to_postgres,
 )
 
 logger = logging.getLogger(__name__)
 
 
 def load_config(config_path: str) -> dict:
-    with open(config_path) as f:
-        cfg = yaml.safe_load(f)
-    # Merge drift config if present
+    """Load generator YAML and normalize the coursework drift key names."""
+    with open(config_path, encoding="utf-8") as file_handle:
+        cfg = yaml.safe_load(file_handle)
     drift_path = Path(config_path).parent / "drift.yaml"
     if drift_path.exists():
-        with open(drift_path) as f:
-            cfg["drift"] = yaml.safe_load(f)
+        with drift_path.open(encoding="utf-8") as file_handle:
+            raw_drift = yaml.safe_load(file_handle)
+        cfg["drift"] = {
+            "enabled": raw_drift.get("drift_enabled", False)
+            and raw_drift.get("scenario_A_volatility_regime", False),
+            "start_date": raw_drift.get("drift_start_date"),
+            "mode": raw_drift.get("drift_mode", "gradual"),
+            "ramp_trading_days": raw_drift.get("drift_ramp_trading_days", 10),
+            "volatility_multiplier": raw_drift.get("volatility_multiplier", 1.0),
+            "smallcap_amplifier": raw_drift.get("smallcap_amplifier", 1.0),
+        }
     return cfg
 
 
@@ -53,8 +60,8 @@ def load_seed(seed_path: str = None) -> list[dict]:
         seed_path = Path(__file__).parent / "seed" / "tickers_reference.json"
 
     if os.path.exists(seed_path):
-        with open(seed_path) as f:
-            data = json.load(f)
+        with open(seed_path, encoding="utf-8") as file_handle:
+            data = json.load(file_handle)
         if data:
             return data
 
@@ -80,16 +87,18 @@ def _mock_seed() -> list[dict]:
     ]
     for i in range(20):
         ticker = f"MOCK{i:02d}"
-        tickers.append({
-            "ticker_id": ticker,
-            "ticker": ticker,
-            "company_name": f"Mock Company {i:02d}",
-            "exchange": exchanges[i % len(exchanges)],
-            "icb_l1": industries[i % len(industries)][0],
-            "icb_l2": industries[i % len(industries)][1],
-            "listing_date": "2024-01-01",
-            "is_active": True,
-        })
+        tickers.append(
+            {
+                "ticker_id": ticker,
+                "ticker": ticker,
+                "company_name": f"Mock Company {i:02d}",
+                "exchange": exchanges[i % len(exchanges)],
+                "icb_l1": industries[i % len(industries)][0],
+                "icb_l2": industries[i % len(industries)][1],
+                "listing_date": "2024-01-01",
+                "is_active": True,
+            }
+        )
     return tickers
 
 
@@ -115,17 +124,27 @@ def run_offline(cfg: dict, gen: Generator):
     run_date = datetime.now().strftime("%Y-%m-%d")
 
     logger.info("Writing Parquet to landing...")
-    write_parquet_landing(ohlcv, "ohlcv_daily", run_date)
+    write_ohlcv_landing(ohlcv, run_date)
     write_parquet_landing(foreign_flow, "foreign_flow_daily", run_date)
     write_parquet_landing(corp_actions, "corporate_actions", run_date)
     write_parquet_landing(fin_ratios, "financial_ratios", run_date)
 
     logger.info("Writing reference tables to vendor_db...")
-    write_to_postgres(gen.tickers.rename(columns={"icb_l1": "icb_industry_l1", "icb_l2": "icb_industry_l2"}), "tickers")
+    write_to_postgres(
+        gen.tickers.rename(columns={"icb_l1": "icb_industry_l1", "icb_l2": "icb_industry_l2"}),
+        "tickers",
+    )
     write_to_postgres(corp_actions, "corporate_actions")
 
     logger.info("Generating quality report...")
-    generate_quality_report(ohlcv, [], cfg, gen.schema_change_date, tickers_df=gen.tickers)
+    generate_quality_report(
+        ohlcv,
+        [],
+        cfg,
+        gen.schema_change_date,
+        tickers_df=gen.tickers,
+        output_path=cfg.get("quality_report_path", "data/quality_report.md"),
+    )
 
     logger.info("Offline generation complete.")
     return ohlcv, foreign_flow, corp_actions, fin_ratios
@@ -138,30 +157,52 @@ def run_stream(cfg: dict, gen: Generator, ohlcv=None):
         ohlcv = gen.generate_ohlcv()
         ohlcv = tag_schema_version(ohlcv, gen.schema_change_date)
         ohlcv = apply_volume_skew(ohlcv, gen.tickers, cfg)
+        ohlcv = inject_duplicates(
+            ohlcv,
+            cfg.get("duplicate_rate_offline", 0.02),
+            ["ticker_id", "trade_date"],
+            gen.rng,
+        )
 
     logger.info("Generating streaming events for %d trading days...", len(gen.trading_days))
     events = gen.generate_streaming_events(ohlcv)
 
     dup_rate = cfg.get("duplicate_rate_stream", 0.015)
     events = inject_stream_duplicates(events, dup_rate, gen.rng)
+    events.sort(key=lambda event: event["created_ts"])
 
-    kafka_topic = cfg.get("kafka_topic", "stock_market_events")
+    kafka_topic = cfg.get("kafka_topic", "stock_market_events_v3")
     logger.info("Publishing %d events...", len(events))
 
-    write_to_kafka(events, kafka_topic)
+    write_to_kafka(
+        events,
+        kafka_topic,
+        partitions=int(cfg.get("kafka_partitions", 4)),
+        retention_ms=int(cfg.get("kafka_retention_ms", -1)),
+    )
 
     logger.info("Writing JSONL file-sink...")
     for td in gen.trading_days:
-        td_str = td if isinstance(td, str) else td.isoformat() if hasattr(td, "isoformat") else str(td)
+        td_str = (
+            td if isinstance(td, str) else td.isoformat() if hasattr(td, "isoformat") else str(td)
+        )
         day_events = [e for e in events if e["event_timestamp"][:10] == td_str[:10]]
         if day_events:
             write_jsonl(day_events, td_str)
 
-    generate_quality_report(ohlcv, events, cfg, gen.schema_change_date, tickers_df=gen.tickers)
+    generate_quality_report(
+        ohlcv,
+        events,
+        cfg,
+        gen.schema_change_date,
+        tickers_df=gen.tickers,
+        output_path=cfg.get("quality_report_path", "data/quality_report.md"),
+    )
     logger.info("Streaming generation complete. %d events produced.", len(events))
 
 
 def main():
+    """Parse CLI arguments and execute the selected generation mode."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
     parser = argparse.ArgumentParser(description="VN Stock Market Data Generator")
     parser.add_argument("--mode", choices=["offline", "stream", "all"], required=True)

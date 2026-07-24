@@ -6,12 +6,15 @@ from jobs.bronze.offline import add_ingest_metadata, validate_contract
 @pytest.fixture(scope="module")
 def spark():
     try:
-        from pyspark.sql import SparkSession
-        session = SparkSession.builder.appName("test").master("local[1]").getOrCreate()
-        yield session
-        session.stop()
+        from jobs.spark_session import get_spark
+
+        session = get_spark("test_bronze")
     except Exception:
         pytest.skip("Java/Spark unavailable")
+    try:
+        yield session
+    finally:
+        session.stop()
 
 
 class TestValidateContract:
@@ -20,8 +23,8 @@ class TestValidateContract:
             "required": ["ticker_id", "trade_date", "open", "close", "volume"],
         }
         df = spark.createDataFrame(
-            [("A", "2025-07-01", 100.0, 101.0, 1000, "x")],
-            ["ticker_id", "trade_date", "open", "close", "volume", "extra_col"],
+            [("A", "2025-07-01", 100.0, 101.0, 1000)],
+            ["ticker_id", "trade_date", "open", "close", "volume"],
         )
         validate_contract(df, contract, 1)
 
@@ -36,10 +39,14 @@ class TestValidateContract:
         with pytest.raises(ValueError, match="missing required columns"):
             validate_contract(df, contract, 1)
 
-    def test_extra_columns_allowed(self, spark):
-        contract = {"required": ["ticker_id"]}
+    def test_unregistered_vendor_columns_rejected(self, spark):
+        contract = {
+            "required": ["ticker_id"],
+            "properties": {"ticker_id": {"type": "string"}},
+        }
         df = spark.createDataFrame([("A", 42)], ["ticker_id", "bonus"])
-        validate_contract(df, contract, 1)
+        with pytest.raises(ValueError, match="unregistered columns"):
+            validate_contract(df, contract, 1)
 
 
 class TestAddIngestMetadata:

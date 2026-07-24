@@ -1,3 +1,5 @@
+"""Airflow DP2 DAG: daily deduplication, harmonization, and quality gates."""
+
 # =============================================================================
 # Airflow DAG: Silver Daily Transformations (DP2 — part 1)
 # =============================================================================
@@ -26,13 +28,14 @@ with DAG(
     start_date=datetime(2025, 7, 1),
     schedule_interval="0 16 * * *",
     catchup=False,
+    max_active_tasks=1,
     tags=["silver", "daily", "dp2"],
 ) as dag:
-
     BRONZE_DIR = os.getenv("BRONZE_DIR", "data/bronze")
     SILVER_DIR = os.getenv("SILVER_DIR", "data/silver")
 
     def dedup_ohlcv(**context):
+        """Harmonize OHLCV versions, deduplicate, and attach DQ flags."""
         from jobs.silver.daily import dedup, read_bronze_ohlcv, validate_domain
         from jobs.spark_session import get_spark
 
@@ -46,12 +49,18 @@ with DAG(
             df = validate_domain(df)
 
             out_path = os.path.join(SILVER_DIR, "stg_daily_price")
-            df.write.format("delta").mode("overwrite").save(out_path)
+            (
+                df.write.format("delta")
+                .mode("overwrite")
+                .option("overwriteSchema", "true")
+                .save(out_path)
+            )
             print(f"  Wrote {df.count()} rows -> {out_path}")
         finally:
             spark.stop()
 
     def dedup_foreign_flow(**context):
+        """Deduplicate the daily foreign-flow source."""
         from jobs.silver.daily import dedup
         from jobs.spark_session import get_spark
 
@@ -66,7 +75,12 @@ with DAG(
             df = spark.read.format("delta").load(path)
             df = dedup(df)
             out_path = os.path.join(SILVER_DIR, "stg_foreign_flow")
-            df.write.format("delta").mode("overwrite").save(out_path)
+            (
+                df.write.format("delta")
+                .mode("overwrite")
+                .option("overwriteSchema", "true")
+                .save(out_path)
+            )
             print(f"  Wrote {df.count()} rows -> {out_path}")
         finally:
             spark.stop()
@@ -74,6 +88,7 @@ with DAG(
     # === Validate stage ===
 
     def validate_uniqueness(**context):
+        """Fail when a Silver table violates its declared grain."""
         from pyspark.sql import functions as F
 
         from jobs.spark_session import get_spark
@@ -86,7 +101,9 @@ with DAG(
                     continue
                 df = spark.read.format("delta").load(path)
                 total = df.count()
-                dupes = df.groupBy("ticker_id", "trade_date").count().filter(F.col("count") > 1).count()
+                dupes = (
+                    df.groupBy("ticker_id", "trade_date").count().filter(F.col("count") > 1).count()
+                )
                 if dupes > 0:
                     raise ValueError(f"{table}: {dupes} duplicate (ticker_id, trade_date) groups")
                 print(f"  {table}: uniqueness OK ({total} rows)")
@@ -94,6 +111,7 @@ with DAG(
             spark.stop()
 
     def validate_referential(**context):
+        """Verify that daily rows do not fall on weekend dates."""
         from pyspark.sql import functions as F
 
         from jobs.spark_session import get_spark
@@ -104,11 +122,17 @@ with DAG(
             if not os.path.exists(stg_path):
                 return
             df = spark.read.format("delta").load(stg_path)
-            dates = [r.trade_date for r in df.select("trade_date").distinct().orderBy("trade_date").collect()]
+            dates = [
+                r.trade_date
+                for r in df.select("trade_date").distinct().orderBy("trade_date").collect()
+            ]
             # Basic weekday check: count weekend dates
-            weekend_count = spark.createDataFrame(
-                [(d,) for d in dates], ["trade_date"]
-            ).withColumn("dow", F.dayofweek(F.col("trade_date"))).filter(F.col("dow").isin([1, 7])).count()
+            weekend_count = (
+                spark.createDataFrame([(d,) for d in dates], ["trade_date"])
+                .withColumn("dow", F.dayofweek(F.col("trade_date")))
+                .filter(F.col("dow").isin([1, 7]))
+                .count()
+            )
             if weekend_count > 0:
                 print(f"  WARNING: {weekend_count} rows on weekends — possible calendar gap")
             print(f"  referential check: {len(dates)} unique dates, {weekend_count} weekend dates")
@@ -116,6 +140,7 @@ with DAG(
             spark.stop()
 
     def validate_domain(**context):
+        """Report row-level market-domain rule failures."""
         from pyspark.sql import functions as F
 
         from jobs.silver.daily import validate_domain
@@ -135,7 +160,37 @@ with DAG(
         finally:
             spark.stop()
 
+    def validate_cardinality(**context):
+        """Log approximate and exact cardinality evidence."""
+        from pyspark.sql import functions as F
+
+        from jobs.spark_session import get_spark
+
+        spark = get_spark("silver_val_card")
+        try:
+            path = os.path.join(SILVER_DIR, "stg_daily_price")
+            if not os.path.exists(path):
+                return
+            df = spark.read.format("delta").load(path)
+            approx_tickers = df.select(F.approx_count_distinct("ticker_id")).collect()[0][0]
+            exact_tickers = df.select(F.countDistinct("ticker_id")).collect()[0][0]
+            composite_key = F.concat_ws(
+                "|",
+                F.col("ticker_id"),
+                F.col("trade_date").cast("string"),
+            )
+            approx_keys = df.select(F.approx_count_distinct(composite_key)).collect()[0][0]
+            exact_keys = df.select(F.countDistinct("ticker_id", "trade_date")).collect()[0][0]
+            print(
+                "  Cardinality: "
+                f"approx={approx_tickers}, exact={exact_tickers} tickers; "
+                f"approx={approx_keys}, exact={exact_keys} (ticker_id, trade_date) pairs"
+            )
+        finally:
+            spark.stop()
+
     def validate_duplicates(**context):
+        """Report the post-dedup duplicate rate."""
         from pyspark.sql import functions as F
 
         from jobs.spark_session import get_spark
@@ -155,9 +210,14 @@ with DAG(
 
     t_dedup_ohlcv = PythonOperator(task_id="dedup_ohlcv", python_callable=dedup_ohlcv)
     t_dedup_ff = PythonOperator(task_id="dedup_foreign_flow", python_callable=dedup_foreign_flow)
-    t_val_unique = PythonOperator(task_id="validate_uniqueness", python_callable=validate_uniqueness)
+    t_val_unique = PythonOperator(
+        task_id="validate_uniqueness", python_callable=validate_uniqueness
+    )
     t_val_ref = PythonOperator(task_id="validate_referential", python_callable=validate_referential)
     t_val_domain = PythonOperator(task_id="validate_domain", python_callable=validate_domain)
     t_val_dup = PythonOperator(task_id="validate_duplicates", python_callable=validate_duplicates)
+    t_val_card = PythonOperator(
+        task_id="validate_cardinality", python_callable=validate_cardinality
+    )
 
-    [t_dedup_ohlcv, t_dedup_ff] >> t_val_unique >> [t_val_ref, t_val_domain, t_val_dup]
+    [t_dedup_ohlcv, t_dedup_ff] >> t_val_unique >> [t_val_ref, t_val_domain, t_val_dup, t_val_card]

@@ -2,7 +2,6 @@
 
 import os
 import sys
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -14,19 +13,20 @@ sys.path.insert(0, str(PROJECT_ROOT))
 @pytest.fixture(scope="module")
 def spark():
     try:
-        from pyspark.sql import SparkSession
-        session = (
-            SparkSession.builder.appName("test_pipeline")
-            .master("local[1]")
-            .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
-            .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
-            .config("spark.databricks.delta.schema.autoMerge.enabled", "true")
-            .getOrCreate()
+        from jobs.spark_session import get_spark
+
+        session = get_spark(
+            "test_pipeline",
+            {
+                "spark.databricks.delta.schema.autoMerge.enabled": "true",
+            },
         )
-        yield session
-        session.stop()
     except Exception:
         pytest.skip("Java/Spark unavailable")
+    try:
+        yield session
+    finally:
+        session.stop()
 
 
 def _run_generator(spark, data_dir, n_tickers=10, days_history=60):
@@ -54,16 +54,18 @@ def _run_generator(spark, data_dir, n_tickers=10, days_history=60):
 
     seed = []
     for i in range(cfg["n_tickers"]):
-        seed.append({
-            "ticker_id": f"T{i:03d}",
-            "ticker": f"T{i:03d}",
-            "company_name": f"Test Company {i}",
-            "exchange": "HOSE",
-            "icb_l1": "Financials",
-            "icb_l2": "Banking",
-            "listing_date": "2024-01-01",
-            "is_active": True,
-        })
+        seed.append(
+            {
+                "ticker_id": f"T{i:03d}",
+                "ticker": f"T{i:03d}",
+                "company_name": f"Test Company {i}",
+                "exchange": "HOSE",
+                "icb_l1": "Financials",
+                "icb_l2": "Banking",
+                "listing_date": "2024-01-01",
+                "is_active": True,
+            }
+        )
 
     gen = Generator(cfg, seed)
     gen.trading_days = generate_trading_calendar(start_date, cfg["days_history"])
@@ -80,6 +82,7 @@ def _run_generator(spark, data_dir, n_tickers=10, days_history=60):
     fin_ratios = gen.generate_financial_ratios(ohlcv)
 
     from datetime import datetime
+
     run_date = datetime.now().strftime("%Y-%m-%d")
     os.makedirs(data_dir, exist_ok=True)
 
@@ -88,8 +91,12 @@ def _run_generator(spark, data_dir, n_tickers=10, days_history=60):
     write_parquet_landing(corp_actions, "corporate_actions", run_date, base_dir=data_dir)
     write_parquet_landing(fin_ratios, "financial_ratios", run_date, base_dir=data_dir)
 
-    return {"ohlcv": len(ohlcv), "foreign_flow": len(foreign_flow),
-            "corp_actions": len(corp_actions), "fin_ratios": len(fin_ratios)}
+    return {
+        "ohlcv": len(ohlcv),
+        "foreign_flow": len(foreign_flow),
+        "corp_actions": len(corp_actions),
+        "fin_ratios": len(fin_ratios),
+    }
 
 
 class TestPipelineEndToEnd:
@@ -105,9 +112,11 @@ class TestPipelineEndToEnd:
         assert gen_result["ohlcv"] > 0
 
         # 2. Bronze — read landing parquet + write delta
-        from jobs.bronze.offline import add_ingest_metadata, read_landing_parquet, validate_contract
-        from datetime import datetime
         import json
+        from datetime import datetime
+
+        from jobs.bronze.offline import add_ingest_metadata, read_landing_parquet, validate_contract
+
         batch_id_str = datetime.now().strftime("%Y%m%d_%H%M%S")
 
         df_ohlcv = read_landing_parquet(spark, landing_dir, "ohlcv_daily")
@@ -136,14 +145,14 @@ class TestPipelineEndToEnd:
         assert df.count() > 0
         df = dedup(df)
         df = validate_domain(df)
-        df.write.format("delta").mode("overwrite").save(
-            os.path.join(silver_dir, "stg_daily_price")
-        )
+        df.write.format("delta").mode("overwrite").save(os.path.join(silver_dir, "stg_daily_price"))
         assert os.path.exists(os.path.join(silver_dir, "stg_daily_price"))
 
         # 4. Gold
         from jobs.gold.dimensions import (
-            build_dim_date, build_dim_ticker, read_silver_daily,
+            build_dim_date,
+            build_dim_ticker,
+            read_silver_daily,
         )
         from jobs.gold.facts import build_fact_daily_price
         from jobs.gold.features import build_feat_ticker_daily
@@ -154,7 +163,7 @@ class TestPipelineEndToEnd:
 
         build_dim_date(spark, df_silver, gold_dir)
         build_dim_ticker(spark, df_silver, gold_dir)
-        build_fact_daily_price(df_silver, gold_dir)
+        build_fact_daily_price(spark, df_silver, gold_dir)
         assert os.path.exists(os.path.join(gold_dir, "fact_daily_price"))
 
         build_obt(spark, gold_dir)
@@ -168,7 +177,18 @@ class TestPipelineEndToEnd:
         # 5. Drift
         from jobs.gold.drift import build_agg_feature_health, build_ml_ticker_training
 
-        build_agg_feature_health(spark, gold_dir)
+        # The compact fixture ends before the production 2025-09-01 drift
+        # boundary, so place its monitoring boundary after 40 trading days.
+        fixture_dates = [
+            row.trade_date
+            for row in spark.read.format("delta")
+            .load(os.path.join(gold_dir, "fact_daily_price"))
+            .select("trade_date")
+            .distinct()
+            .orderBy("trade_date")
+            .collect()
+        ]
+        build_agg_feature_health(spark, gold_dir, drift_start_date=fixture_dates[40])
         assert os.path.exists(os.path.join(gold_dir, "agg_feature_health_daily"))
 
         build_ml_ticker_training(spark, gold_dir)

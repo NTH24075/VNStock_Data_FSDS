@@ -1,11 +1,13 @@
 # =============================================================================
-# Spark custom image — extends bitnami/spark with project Python dependencies
+# Spark custom image — Apache Spark plus the Python dependencies used by jobs/tests
 # =============================================================================
 
-FROM bitnami/spark:3.5
+FROM apache/spark:3.5.3-scala2.12-java17-python3-ubuntu
 
 USER root
-RUN pip install --no-cache-dir \
-    delta-spark pandas numpy pyarrow minio
+RUN python3 -m pip install --no-cache-dir \
+    pandas numpy pyarrow pyyaml minio pytest pytest-cov
 
-USER 1001
+ENV PYTHONPATH="/opt/project:/opt/spark/python/lib/pyspark.zip:/opt/spark/python/lib/py4j-0.10.9.7-src.zip"
+
+USER 185

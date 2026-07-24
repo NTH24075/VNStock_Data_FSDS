@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 def optimize_table(spark: SparkSession, table_path: str, zorder_cols: list[str] = None):
+    """Compact a Delta table and optionally Z-order selected columns."""
     if not os.path.exists(table_path):
         logger.info("  Skipping (not found): %s", table_path)
         return
@@ -35,9 +36,13 @@ def optimize_table(spark: SparkSession, table_path: str, zorder_cols: list[str] 
 
 
 def run_maintenance(gold_dir: str = "data/gold"):
-    spark = get_spark("delta_maintenance", {
-        "spark.databricks.delta.retentionDurationCheck.enabled": "false",
-    })
+    """Run weekly maintenance across the high-value Gold tables."""
+    spark = get_spark(
+        "delta_maintenance",
+        {
+            "spark.databricks.delta.retentionDurationCheck.enabled": "false",
+        },
+    )
 
     tables = [
         ("fact_daily_price", ["ticker_id"]),

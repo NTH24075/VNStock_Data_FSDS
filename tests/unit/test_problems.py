@@ -25,7 +25,9 @@ class TestInjectDuplicates:
 
     def test_duplicate_rows_identical(self):
         rng = np.random.default_rng(42)
-        df = pd.DataFrame({"ticker_id": ["A", "B"], "trade_date": ["2025-07-01"] * 2, "close": [100.0, 200.0]})
+        df = pd.DataFrame(
+            {"ticker_id": ["A", "B"], "trade_date": ["2025-07-01"] * 2, "close": [100.0, 200.0]}
+        )
         result = inject_duplicates(df, 0.5, ["ticker_id", "trade_date"], rng)
         duplicates = result[result.duplicated(keep=False)]
         assert len(duplicates) == 2  # one pair
@@ -49,20 +51,48 @@ class TestInjectStreamDuplicates:
         result = inject_stream_duplicates(events, 0.0, rng)
         assert len(result) == 2
 
+    def test_replays_follow_originals_in_arrival_order(self):
+        rng = np.random.default_rng(42)
+        events = [
+            {
+                "event_id": "1",
+                "created_ts": "2025-07-01T09:00:00",
+            },
+            {
+                "event_id": "2",
+                "created_ts": "2025-07-01T09:01:00",
+            },
+        ]
+        result = inject_stream_duplicates(events, 0.5, rng)
+        assert [event["created_ts"] for event in result] == sorted(
+            event["created_ts"] for event in result
+        )
+        replay = next(event for event in result if event.get("_is_replay"))
+        original = next(
+            event
+            for event in result
+            if event["event_id"] == replay["event_id"] and not event.get("_is_replay")
+        )
+        assert replay["created_ts"] > original["created_ts"]
+
 
 class TestApplyVolumeSkew:
     def test_redistributes_volume(self):
-        tickers_df = pd.DataFrame({
-            "ticker_id": ["A", "B", "C", "D"],
-            "vn30": [True, True, False, False],
-        })
-        df = pd.DataFrame({
-            "ticker_id": ["A", "B", "C", "D"],
-            "trade_date": ["2025-07-01"] * 4,
-            "close": [100.0] * 4,
-            "volume": [10000, 10000, 10000, 10000],
-            "value": [1000000.0] * 4,
-        })
+        tickers_df = pd.DataFrame(
+            {
+                "ticker_id": ["A", "B", "C", "D"],
+                "vn30": [True, True, False, False],
+            }
+        )
+        df = pd.DataFrame(
+            {
+                "ticker_id": ["A", "B", "C", "D"],
+                "trade_date": ["2025-07-01"] * 4,
+                "close": [100.0] * 4,
+                "volume": [10000, 10000, 10000, 10000],
+                "value": [1000000.0] * 4,
+            }
+        )
         cfg = {"vn30_volume_share": 0.80}
         result = apply_volume_skew(df, tickers_df, cfg)
 
@@ -74,17 +104,21 @@ class TestApplyVolumeSkew:
         assert abs(non_vn30_total / total - 0.20) < 0.01
 
     def test_value_updated(self):
-        tickers_df = pd.DataFrame({
-            "ticker_id": ["X"],
-            "vn30": [True],
-        })
-        df = pd.DataFrame({
-            "ticker_id": ["X"],
-            "trade_date": ["2025-07-01"],
-            "close": [100.0],
-            "volume": [1000],
-            "value": [0.0],
-        })
+        tickers_df = pd.DataFrame(
+            {
+                "ticker_id": ["X"],
+                "vn30": [True],
+            }
+        )
+        df = pd.DataFrame(
+            {
+                "ticker_id": ["X"],
+                "trade_date": ["2025-07-01"],
+                "close": [100.0],
+                "volume": [1000],
+                "value": [0.0],
+            }
+        )
         cfg = {"vn30_volume_share": 1.0}
         result = apply_volume_skew(df, tickers_df, cfg)
         # value should be close * volume after skew

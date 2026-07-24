@@ -1,3 +1,5 @@
+"""Airflow DP3 DAG: compute intraday event-time feature windows."""
+
 # =============================================================================
 # Airflow DAG: Feature Stream Job (DP2 — streaming path)
 # =============================================================================
@@ -30,16 +32,22 @@ with DAG(
     catchup=False,
     tags=["features", "streaming", "dp2"],
 ) as dag:
-
     SILVER_DIR = os.getenv("SILVER_DIR", "data/silver")
     GOLD_DIR = os.getenv("GOLD_DIR", "data/gold")
 
     def run_feat(**context):
+        """Start the stream-feature query and wait for termination."""
         from jobs.features.stream import run_feat_stream
 
+        conf = getattr(context.get("dag_run"), "conf", {}) or {}
         spark, query = run_feat_stream(
             silver_dir=SILVER_DIR,
             gold_dir=GOLD_DIR,
+            checkpoint_dir=conf.get(
+                "checkpoint_dir",
+                os.path.join(GOLD_DIR, "_checkpoints", "feat_stream"),
+            ),
+            available_now=bool(conf.get("available_now", False)),
         )
         if query is None:
             return

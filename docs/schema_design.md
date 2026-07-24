@@ -1,7 +1,9 @@
 # Schema Design & Pipeline — All Zones
 
-> Evidence: DBeaver screenshots, Spark UI, Flink UI, Trino EXPLAIN ANALYZE, DataHub lineage.
-> Linked from: README.md §Documentation
+This document adapts Coursework 2.0 to the code that is actually present.
+Submitted visual evidence covers a partial Gold ER model, SCD2 rows and
+feature timestamps. Spark and DataHub UI captures are explicitly absent;
+Flink and Trino evidence is linked from their topic documents.
 
 ## 1. Goal
 
@@ -9,7 +11,9 @@ Business-ready Gold model for market analytics/BI, plus end-to-end data pipeline
 
 **Approach:** Fact–Dimension + OBT + feature tables for downstream ML, following the Medallion architecture (Bronze → Silver → Gold).
 
-**Storage:** Bronze and Silver stored as Delta Lake tables on MinIO (lakehouse architecture). Gold materialized both in Delta (for Spark/Trino access) and exposed through Trino for BI querying.
+**Storage:** Bronze, Silver and Gold are Delta tables on the shared project
+volume. Gold is mirrored to MinIO and registered through Hive Metastore so
+Trino can query the `delta.gold_stock` catalog.
 
 **Schema:** `gold_stock` with naming: `dim_`, `fact_`, `obt_`, `feat_`, `agg_` prefixes. Upstream: Bronze uses `raw_`, Silver uses `stg_`.
 
@@ -33,6 +37,10 @@ Business-ready Gold model for market analytics/BI, plus end-to-end data pipeline
 
 ### SLA Targets
 
+These are Coursework 2.0 design targets, not measured SLO results. The Airflow
+screenshots prove task completion/order but not weekly availability or
+freshness percentiles.
+
 | Pipeline | Freshness Target |
 |----------|-----------------|
 | Bronze offline ingest | ≤ 10 min from generator drop |
@@ -51,9 +59,9 @@ Business-ready Gold model for market analytics/BI, plus end-to-end data pipeline
 
 | Layer | Prefix | Storage | Purpose |
 |-------|--------|---------|---------|
-| Bronze | `raw_` | Delta on MinIO | Raw ingestion, append-only, ingest metadata |
-| Silver | `stg_` | Delta on MinIO | Deduped, type-cast, schema-harmonized |
-| Gold | `dim_`, `fact_`, `obt_`, `feat_`, `agg_`, `ml_` | Delta + Trino | Business-ready, query-optimized |
+| Bronze | `raw_` | Delta on shared project volume | Contract-checked snapshot plus ingest metadata |
+| Silver | `stg_` | Delta on shared project volume | Deduped, type-cast, schema-harmonized |
+| Gold | `dim_`, `fact_`, `obt_`, `feat_`, `agg_`, `ml_` | Delta on shared volume; Gold mirror queried through MinIO/Hive/Trino | Business-ready, query-optimized |
 
 All feature tables carry two timestamp columns:
 - `event_timestamp` — the feature as-of time (for point-in-time joins)
@@ -88,7 +96,7 @@ All Bronze tables carry: `_ingested_at`, `_batch_id`, `_schema_version`.
 | `stg_daily_price` | (ticker_id, trade_date) | Dedup, domain validate, schema harmonize | Missing columns from v1 → typed NULL + `_schema_version` tag |
 | `stg_foreign_flow` | (ticker_id, trade_date) | Dedup | |
 | `stg_corporate_actions` | action_id | — | |
-| `stg_trades` | trade_id | Dedup by event_id + latest created_ts, watermark=60s | |
+| `stg_trades` | trade_id | Dedup by event_id (first arrival wins), watermark=60s | |
 | `stg_quotes` | event_id | Dedup | |
 | `stg_events_quarantine` | event_id | Late-beyond-watermark events | Side-output from Flink watermark |
 
@@ -98,7 +106,8 @@ All Bronze tables carry: `_ingested_at`, `_batch_id`, `_schema_version`.
 3. Domain validation: `_dq_price_positive`, `_dq_high_ge_max` (high ≥ max(open, close)), `_dq_low_le_min` (low ≤ min(open, close)), `_dq_volume_nonneg` — flagged, not dropped
 
 **Silver stream pipeline** (`dags/silver_stream.py` → `jobs/silver/stream.py`):
-- Dedup by `event_id` + latest `created_ts`
+- Dedup by `event_id`; the PyFlink stateful path emits the first arrival and
+  suppresses later replays with the same ID
 - Event-time watermark = 60s (covers 5–45s late range)
 - Late-beyond-watermark → `stg_events_quarantine` (side output)
 - Contract-validated against `contracts/stg_trades.v1.json` / `contracts/stg_quotes.v1.json`
@@ -123,6 +132,14 @@ All Gold tables live in `data/gold/` as Delta Lake tables. Code in `jobs/gold/`.
 
 **Why `dim_date.is_trading_day`:** the biggest departure from standard date dimensions. All window features count **trading days** (not calendar days), joined through this dimension. Calendar gaps on weekends/holidays are expected.
 
+![SCD Type 2 rows in dim_ticker](images/16_dbeaver_scd2.png)
+
+*Figure 1 — Trino/DBeaver query of `delta.gold_stock.dim_ticker`. Tickers such
+as ACB and ACM have a closed historical version (`valid_to_ts` populated,
+`is_current=false`) and a later open version (`valid_to_ts=NULL`,
+`is_current=true`), demonstrating that the SCD2 columns are populated rather
+than only declared.*
+
 ### 5.2 Facts (`fact_`)
 
 | Table | Grain | Measures | Code |
@@ -131,7 +148,11 @@ All Gold tables live in `data/gold/` as Delta Lake tables. Code in `jobs/gold/`.
 | `fact_intraday_trade` | trade_id | price, quantity, trade_value | `facts.py:build_fact_intraday_trade()` |
 | `fact_foreign_flow` | (ticker_key, trade_date_key) | foreign_buy/sell_vol, foreign_buy/sell_value, foreign_net_value | |
 
-**`adj_close` computation:** cumulative adjustment factors from `corporate_actions` (splits, stock dividends), versioned by `known_as_of_date` to support point-in-time correctness.
+**`adj_close` computation:** cumulative adjustment factors from future
+split/stock-dividend ex-dates. The Coursework 2.0 design calls for
+announcement-time (`known_as_of_date`) versioning; the current fact builder
+does not use `announced_ts`, so that stricter point-in-time rule remains an
+implementation gap.
 
 **Schema evolution handling:** rows from partitions before 2025-07-01 carry `value = NULL` and `foreign_room = NULL` with `_schema_version` marking the source schema — downstream consumers distinguish "missing by design" from "missing by error."
 
@@ -172,6 +193,13 @@ All windows are computed in **trading time**, not wall-clock time — the 20-day
 - `f_stream_volume_5m` — sum(quantity) in tumbling 5-min event-time window, keyed by ticker_id
 - `f_stream_trade_count_30m` — count() in sliding 30-min/1-min event-time window, keyed by ticker_id
 
+![Feature table timestamps](images/17_dbeaver_feature_timestamps.png)
+
+*Figure 2 — `DESCRIBE delta.gold_stock.feat_ticker_daily` showing both
+`event_timestamp` and `created_ts` as timestamp-with-time-zone fields. The
+former is the feature as-of time; the latter is computation/materialization
+time.*
+
 ### 5.5 Point-in-Time Correctness
 
 Two rules, one domain-specific:
@@ -181,7 +209,8 @@ Two rules, one domain-specific:
 
 ### 5.6 Feature TTL Design
 
-TTL controls how long a feature value is usable for **online serving** (does not affect Gold/offline history, retained indefinitely for training and backfill).
+This is a Coursework 2.0 design extension. No online feature store or TTL
+enforcement service is implemented in this Kỳ 1 repository.
 
 | Feature table | Online TTL | Rationale |
 |---|---|---|
@@ -189,7 +218,9 @@ TTL controls how long a feature value is usable for **online serving** (does not
 | `feat_stream_intraday` | 10 minutes | Refreshed every 1–5 min; a value older than 10 min likely reflects a stalled job, not real market state |
 | `feat_ticker_unified` | 20 minutes | Rebuilt every 15 min; 20 min tolerates one missed refresh cycle |
 
-**Session-aware TTL:** outside trading hours (11:30–13:00 lunch, 14:45–09:00 overnight) no new streaming features are produced — a naive TTL would expire `feat_stream_intraday` constantly during lunch. TTL clock is suspended outside HOSE trading hours, so a value written at 11:29 is still valid at 13:05.
+**Proposed session-aware TTL:** outside trading hours (11:30–13:00 lunch,
+14:45–09:00 overnight) no new streaming features are produced. A future
+online store should suspend freshness aging across closed sessions.
 
 ### 5.7 Label Table (`ml_`)
 
@@ -202,7 +233,9 @@ TTL controls how long a feature value is usable for **online serving** (does not
 **Point-in-time discipline:**
 - `event_timestamp` = end-of-day T (feature snapshot time)
 - `created_ts` = time the label became computable (after close of T+3) — the gap is **structural** (labels arrive 3 trading days late by definition)
-- Labels use `adj_close` with adjustment factors known as of T+3
+- Labels use the implemented `adj_close`; because action factors are not
+  announcement-versioned yet, the stricter T+3 corporate-action knowledge
+  rule is not fully enforced
 
 ### 5.8 Training Table
 
@@ -219,7 +252,8 @@ TTL controls how long a feature value is usable for **online serving** (does not
 
 PSI (Population Stability Index) computed via `drift.py:compute_psi()`: 10-bin histogram comparison of current distribution vs 30-day baseline window. Alert threshold: **PSI > 0.15**.
 
-Drift alerting and TTL expiry are two independent signals — a stale-but-not-drifted feature and a fresh-but-drifted feature are distinguishable failure modes.
+Drift alerting is implemented. TTL expiry would be an independent signal in
+the proposed online-store extension.
 
 ---
 
@@ -239,6 +273,17 @@ feat_stream_intraday ──┘       │
                                └── ml_ticker_label
 ```
 
+![Partial Gold ER diagram](images/15_dbeaver_bronze_silver_gold_er.png)
+
+*Figure 3 — DBeaver ER view from the Trino `delta.gold_stock` catalog. The
+captured subset shows `dim_ticker` related to `fact_daily_price`,
+`fact_intraday_trade`, `obt_ticker_daily_performance` and
+`feat_stream_intraday`. Trino/Delta does not expose physical foreign keys, so
+these are reviewer-oriented virtual relationships. This image is **partial**:
+it does not display Bronze/Silver tables, `dim_date`, foreign-flow facts or the
+ML tables; those objects are documented in the model above but are not claimed
+as visually proven by this screenshot.*
+
 ---
 
 ## 7. Pipeline Design
@@ -256,7 +301,7 @@ feat_stream_intraday ──┘       │
 
 | DAG | Trigger | Input → Output | Code |
 |-----|---------|----------------|------|
-| `bronze_stream_ingest` | @once | Kafka `stock_market_events` → `raw_market_events` Delta | `dags/bronze_stream_ingest.py` |
+| `bronze_stream_ingest` | @once | Kafka `stock_market_events_v3` → `raw_market_events` Delta | `dags/bronze_stream_ingest.py` |
 | `silver_stream` | @once | `raw_market_events` → `stg_trades` + `stg_quotes` (watermark=60s) | `dags/silver_stream.py` |
 | `feat_stream_job` | @once | `stg_trades` → `feat_stream_intraday` | `dags/feat_stream_job.py` |
 
@@ -268,25 +313,35 @@ feat_stream_intraday ──┘       │
 
 ### 7.4 Pipeline Update Strategy
 
-- **Bronze:** append-only with ingest metadata (`_ingested_at`, `_batch_id` / `source_offset`)
-- **Silver:** incremental processing; dedup by business key + event time
-- **Gold dims/facts/OBT:** incremental merge/upsert on stable keys (ticker_id + trade_date; trade_id)
-- **Feature tables:** incremental recomputation by rolling window + merge on (ticker_id, event_timestamp), keeping latest `created_ts`
-- **Backfill policy:** no backfill by default; if needed, re-runs limited to last 1 trading day with idempotent writes (partition overwrite by trade_date makes re-runs safe)
-- **Late-arriving data policy:** events within the 60s watermark merge into their window; quarantined events trigger a bounded window-reprocess job
+- **Offline Bronze/Silver/Gold:** the reference implementation rebuilds
+  deterministic snapshots with Delta `overwrite`. This makes a seed-42 rerun
+  idempotent but is not an incremental MERGE design.
+- **Streaming:** Bronze/Silver/feature paths append with persistent Delta/Flink
+  checkpoints; finite `availableNow` mode exists for a reviewable replay.
+- **Run metadata:** `ops_pipeline_run` is append-only.
+- **Late arrivals:** the PyFlink path assigns event time, applies a 60-second
+  out-of-orderness watermark and routes records beyond watermark plus grace to
+  a side output. No automated quarantine-reprocessing DAG is implemented.
 
 ### 7.5 Pipeline Controls
 
-- **Quality gates per run:** schema checks, uniqueness, nulls, referential, domain checks (price limits, OHLC ordering), cross-consistency (intraday volume vs daily volume). Gate failure → circuit breaker: downstream tasks skipped, alert raised.
-- **Freshness checks:** alert when any SLA target is exceeded.
-- **Volume checks:** alert on row-count deviation > ±40% vs trailing 10-trading-day baseline (calendar-aware: compares only to trading days).
-- **Recovery:** retry ×3 with exponential backoff; quarantine/dead-letter for bad records; idempotent by design.
+- **Implemented quality gates:** contract, row/key/domain, uniqueness,
+  duplicate/cardinality, referential, SCD2, feature timestamp/contract,
+  label-leakage and drift-alert checks.
+- **Dependency control:** downstream tasks do not run when an upstream
+  `PythonOperator` fails.
+- **Recovery:** DAGs configure two or three retries with fixed five- or
+  ten-minute delays. Exponential backoff, freshness paging and the proposed
+  ±40% rolling-volume alert are design extensions, not current code.
 
 ---
 
 ## 8. Spark Compute-Layer Optimization
 
-> Evidence: Spark UI screenshots (before/after), code in `jobs/spark_session.py` and `jobs/silver/daily.py`.
+The following settings and transformations are implemented. The repository
+also contains `scripts/spark_ui_capture.py` for an identical
+baseline/optimized workload, but no Spark UI screenshots were submitted; the
+performance comparison is therefore not claimed as measured evidence.
 
 ### 8.1 Skew Handling (VN30 concentration)
 
@@ -296,7 +351,7 @@ feat_stream_intraday ──┘       │
 
 1. **AQE skew join** — `spark.sql.adaptive.enabled=true`, `spark.sql.adaptive.skewJoin.enabled=true` (Spark 3.x automatically splits oversized partitions at runtime)
 2. **Broadcast join** for `dim_ticker` (~400 rows) against fact tables — removes shuffle on dimension side entirely
-3. **Manual salting** (fallback, not default): add synthetic `salt = hash(ticker_id) % N` only for VN30 tickers, explode dimension side by same salt range, join on (ticker_id, salt), drop salt — documented fallback if AQE insufficient
+3. Manual salting is not used in the reference implementation.
 
 Enabled in `jobs/spark_session.py:get_spark()`.
 
@@ -304,13 +359,23 @@ Enabled in `jobs/spark_session.py:get_spark()`.
 
 **Problem:** `countDistinct(trade_id)` over millions of rows triggers full shuffle-and-sort.
 
-**Fix:** `approx_count_distinct` (HyperLogLog) for quality reports — bounded error (~2%) at fraction of shuffle cost. Exact counts only on daily-grain tables where cost is negligible. For the dedup join itself, `repartition(ticker_id, trade_date)` before the Silver dedup step keeps each composite key's rows colocated, turning the dedup window function into a single-pass-per-partition operation.
+**Fix:** the Silver `validate_cardinality` task computes both
+`approx_count_distinct` and exact counts for ticker and the composite
+ticker/date key. This makes the approximation visible and checks it against
+the exact 72,000-key coursework-sized result. The dedup window partitions by
+`ticker_id, trade_date`; there is no explicit pre-`repartition` call.
 
 ### 8.3 Schema Evolution
 
 **Problem:** Partitions before 2025-07-01 missing `foreign_room` and `value` columns. Using `mergeSchema=true` silently unions schemas, hiding the structural absence from downstream consumers.
 
-**Fix:** Bronze ingestion reads with an **explicit, versioned target schema** (one StructType per `_schema_version`) rather than automatic schema merging. Silver reads v1+v2 with `unionByName(allowMissingColumns=True)`, then fills missing columns as typed NULL literals (`.withColumn("foreign_room", lit(None).cast("double"))`) and stamps `_schema_version`. Enforced at Delta table level: `delta.schema.autoMerge.enabled = false` in `jobs/spark_session.py`.
+**Fix:** the landing reader uses schema merge only to load the physical files,
+then separates rows by their path-derived `_schema_version` and validates each
+subset against its own JSON contract before writing separate v1/v2 Bronze
+tables. Silver combines those tables with
+`unionByName(allowMissingColumns=True)` and adds typed null columns when
+needed. Shared Spark configuration sets
+`spark.databricks.delta.schema.autoMerge.enabled=false`.
 
 ### 8.4 Duplicate Handling
 
@@ -320,7 +385,9 @@ Enabled in `jobs/spark_session.py:get_spark()`.
 
 ## 9. Streaming Optimization (Watermark, Burst, Windows)
 
-> Evidence: Flink UI screenshots (before/after). Code in `jobs/silver/stream.py`, `jobs/features/stream.py`.
+Evidence is Figures 1–5 in `processing_jobs.md`; these show the final running
+job, counters, checkpoints, drained-state backpressure and PyFlink code. There
+is no before/after burst backpressure capture.
 
 ### 9.1 Late Arrival Handling (12%, 5–45s)
 
@@ -336,23 +403,30 @@ Enabled in `jobs/spark_session.py:get_spark()`.
 
 **Problem:** ATO/ATC auction windows produce ×25 baseline volume, causing backpressure on single partition.
 
-**Fixes:**
-1. **Kafka topic partitioned by `ticker_id` hash** (12 partitions) — Flink source runs 12 parallel subtasks, burst load spreads
-2. **Parallelism sized for peak, not average** — `env.setParallelism()` covers the ×25 peak (~85 events/s, trivial for a few subtasks), not the 200/min baseline
-3. **Async I/O** (`AsyncDataStream`) for external enrichment lookups — prevents a slow synchronous call during burst from blocking the whole pipeline
+**Fixes implemented:**
+
+1. Kafka topic `stock_market_events_v3` has **four** ticker-keyed partitions.
+2. Source, keyed process and window vertices each run at parallelism four,
+   giving 12 running tasks and letting all partitions consume concurrently.
+3. Checkpointed file sinks commit replay output consistently.
+
+The job has no external enrichment call and therefore no `AsyncDataStream`
+stage.
 
 ### 9.3 Window Processing
 
 | Feature | Window Type | Size | Slide | Key | Code |
 |---------|------------|------|-------|-----|------|
-| `f_stream_volume_5m` | Tumbling (event-time) | 5 min | — | ticker_id | `features/stream.py` |
-| `f_stream_trade_count_30m` | Sliding (event-time) | 30 min | 1 min | ticker_id | `features/stream.py` |
+| `f_stream_volume_5m` | Tumbling event time | 5 min | — | ticker | `jobs/flink/silver_stream.py` and Spark fallback |
+| `f_stream_trade_count_30m` | Sliding event time | 30 min | 1 min | ticker | `jobs/features/stream.py` |
 
-**Session-gap aware:** lunch break (11:30–13:00) configured as explicit session gap — windows produce no output during gap rather than firing on stale/empty data, avoiding false burst flags at 13:00 when volume resumes from zero.
+The generator emits no lunch-break events, so windows naturally produce no
+rows during that gap. No separate Flink session-gap operator is implemented.
 
 ### 9.4 Duplicate Handling (1.5%)
 
-**Fix:** Dedup by `event_id` keeping latest `created_ts` in a KeyedProcessFunction with state TTL.
+**Fix:** Dedup by `event_id` in a `KeyedProcessFunction`; the implemented
+PyFlink path keeps the first arrival and suppresses later replays.
 
 ---
 
@@ -365,8 +439,9 @@ Enabled in `jobs/spark_session.py:get_spark()`.
 **Optimization 1 — Dashboard Query (sector heatmap):**
 - **Workload:** `obt_ticker_daily_performance` filtered by date range and icb_l1
 - **Bottleneck:** Full scan across dates; small-file problem from daily incremental writes
-- **Fix:** Partition by `trade_date` (monthly), Z-order by `ticker_id`; scheduled `OPTIMIZE` compaction weekly via `delta_maintenance` DAG
-- **Expected result:** scan reduction ~70–90% for typical 1-month dashboard ranges
+- **Fix:** Partition by daily `trade_date`, Z-order by `ticker_id`; scheduled `OPTIMIZE` compaction weekly via `delta_maintenance` DAG
+- **Result:** no before/after file-count, bytes-scanned or duration screenshot
+  was submitted, so no percentage improvement is claimed
 - **Trade-off:** Weekly compaction adds maintenance job; temporary 2× storage during rewrite
 
 **Optimization 2 — Intraday Momentum Query (single ticker):**
@@ -385,26 +460,24 @@ Tables optimized with Z-order columns:
 - `ml_ticker_training` — Z-order `ticker_id`
 - `dim_ticker` — Z-order `ticker_id`
 
-### 10.2 Datawarehouse (Trino-exposed Gold)
+### 10.2 Relational source storage
 
-- **Workload:** Ad-hoc analyst queries filtering by `icb_l1` and `is_vn30` (low-cardinality categorical filters)
-- **Bottleneck:** Categorical filter falls back to full scan — Z-order on `ticker_id` doesn't help `icb_l1` filter
-- **Fixes:**
-  - **Bloom filter index** on `dim_ticker.ticker` (point lookup) — Trino skips files that cannot contain the requested ticker
-  - **Zone maps** (min/max stats) for `trade_date` range filters — auto-collected by Delta `OPTIMIZE`
-  - **Secondary partition on `is_vn30`** (low-cardinality, 30/400 split) on `obt_ticker_daily_performance` — safe to partition without small-file explosion
-- **Result:** File-skip ratio reported from Trino `EXPLAIN ANALYZE` skipped-splits count
-- **Trade-off:** Extra partition increases small files unless compaction keeps pace; bloom filter adds write-time overhead
+PostgreSQL uses the `tickers` primary-key index plus secondary indexes on
+corporate-action ticker/date access paths. Figure 1 in
+`storage_optimization.md` shows the measured primary-key `Index Scan`. Bloom
+filters and a secondary `is_vn30` Delta partition were considered in the
+coursework design but are not implemented and are not submission claims.
 
 ---
 
 ## 11. Data Governance — Lineage & Data Contracts
 
-> Evidence: DataHub UI screenshots (lineage graph, schema metadata, contract assertions).
-
 ### 11.1 Lineage
 
-Dataset and job lineage published to DataHub via Spark/Airflow OpenLineage emitter.
+`datahub/lineage.yml` and `datahub/recipe.yml` publish dataset-to-dataset
+lineage through DataHub's lineage-file source. The recipe does not publish
+Airflow jobs, OpenLineage events, schema contracts or validation assertions.
+No DataHub UI screenshot is in the submitted evidence set.
 
 **DP1: Bronze Ingestion**
 
@@ -415,7 +488,7 @@ Dataset and job lineage published to DataHub via Spark/Airflow OpenLineage emitt
                                                               raw_corporate_actions
                                                               raw_financial_ratios
 
-[Kafka: stock_market_events] ──► [bronze_stream_ingest] ──► raw_market_events
+[Kafka: stock_market_events_v3] ──► [bronze_stream_ingest] ──► raw_market_events
 ```
 
 **DP2: Silver + Gold**
@@ -462,7 +535,9 @@ Versioned JSON schemas in `contracts/` — each contract specifies required colu
 
 A column present in the data but absent from any known contract version → **"contract violation"** alert (distinct from known schema evolution, which is a planned v1→v2 change registered in the contracts folder).
 
-`delta.schema.autoMerge.enabled = false` enforced at Bronze table level via `jobs/spark_session.py` — every schema change must go through the contract-versioned path.
+`spark.databricks.delta.schema.autoMerge.enabled=false` is set on the shared
+Spark session in `jobs/spark_session.py`; every schema change must go through
+the explicit contract-versioned write path.
 
 ---
 

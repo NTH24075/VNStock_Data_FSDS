@@ -17,8 +17,10 @@ logger = logging.getLogger(__name__)
 def run_feat_stream(
     silver_dir: str = "data/silver",
     gold_dir: str = "data/gold",
-    checkpoint_dir: str = "data/checkpoints/feat_stream",
+    checkpoint_dir: str = "data/gold/_checkpoints/feat_stream",
+    available_now: bool = False,
 ):
+    """Build 5-minute-volume and 30-minute sliding trade features."""
     spark = get_spark("feat_stream")
 
     trades_path = os.path.join(silver_dir, "stg_trades")
@@ -27,7 +29,8 @@ def run_feat_stream(
         return spark, None
 
     trades = (
-        spark.readStream.format("delta").load(trades_path)
+        spark.readStream.format("delta")
+        .load(trades_path)
         .withColumn("event_ts", F.col("event_ts").cast("timestamp"))
         .withWatermark("event_ts", "60 seconds")
     )
@@ -48,17 +51,24 @@ def run_feat_stream(
             F.window("event_ts", "30 minutes", "1 minute"),
             F.col("ticker"),
         )
-        .agg(F.count("*").alias("f_stream_trade_count_30m"))
+        .agg(
+            F.count("*").alias("f_stream_trade_count_30m"),
+            F.min_by("price", "event_ts").alias("_first_price"),
+            F.max_by("price", "event_ts").alias("_last_price"),
+        )
         .withColumn("window_start", F.col("window.start"))
         .withColumn("window_end", F.col("window.end"))
         .drop("window")
     )
 
-    feat = vol_5m.join(
-        count_30m,
-        on=["ticker", "window_start", "window_end"],
-        how="full_outer",
+    feat = vol_5m.drop("window_start").join(
+        count_30m.drop("window_start"),
+        on=["ticker", "window_end"],
+        how="inner",
     )
+
+    ticker_count = int(os.getenv("STREAM_TICKER_COUNT", "400"))
+    baseline_per_ticker_30m = 200 * 30 / max(ticker_count, 1)
 
     feat = feat.select(
         F.col("ticker").alias("ticker_id"),
@@ -66,17 +76,33 @@ def run_feat_stream(
         F.current_timestamp().alias("created_ts"),
         F.coalesce(F.col("f_stream_volume_5m"), F.lit(0)).alias("f_stream_volume_5m"),
         F.coalesce(F.col("f_stream_trade_count_30m"), F.lit(0)).alias("f_stream_trade_count_30m"),
+        F.when(
+            F.col("_first_price") > 0,
+            (F.col("_last_price") - F.col("_first_price")) / F.col("_first_price"),
+        ).alias("f_stream_price_momentum_30m"),
+        (F.col("f_stream_trade_count_30m") > F.lit(5 * baseline_per_ticker_30m))
+        .cast("int")
+        .alias("f_stream_burst_flag"),
     )
 
     out = os.path.join(gold_dir, "feat_stream_intraday")
 
     logger.info("Feat stream: stg_trades -> %s", out)
 
-    query = (
-        feat.writeStream.format("delta").outputMode("append")
+    writer = (
+        feat.writeStream.format("delta")
+        .outputMode("append")
         .option("checkpointLocation", checkpoint_dir)
-        .trigger(processingTime="1 minute")
-        .start(out)
     )
+    writer = (
+        writer.trigger(availableNow=True)
+        if available_now
+        else writer.trigger(processingTime="1 minute")
+    )
+    try:
+        query = writer.start(out)
+    except Exception:
+        spark.stop()
+        raise
 
     return spark, query

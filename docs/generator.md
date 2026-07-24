@@ -1,7 +1,10 @@
 # Data Generator
 
-> Evidence: quality report output, config YAML, generator code.
-> Linked from: README.md §Documentation
+This document covers the generator rubric: offline skew, cardinality, physical
+schema evolution, duplicates, streaming burst/late/duplicate behavior,
+configuration, and persistence at the vendor boundary. The figures below are
+from the seed-42 reference run; the machine-readable source is
+[`evidence/generator_quality_report.md`](evidence/generator_quality_report.md).
 
 ## 1. Domain Overview
 
@@ -18,7 +21,7 @@ The goal is to support downstream ingestion, transformation, and feature enginee
 
 ### 2.1 Ticker Selection
 
-- `n_tickers` (default 50, configurable to ~400 for full HOSE universe) selected from the frozen seed file
+- The submitted configuration selects 400 tickers from the frozen seed file
 - First `vn30_count` tickers tagged as VN30 (large-cap index)
 - Each ticker carries: `ticker_id`, `ticker`, `company_name`, `exchange` (HOSE/HNX/UPCOM), `icb_l1`, `icb_l2`, `listing_date`, `is_active`
 - Implemented in `generator/generators.py:Generator._select_tickers()`
@@ -64,7 +67,9 @@ Unlike the e-commerce domain, data only exists on **trading days**. The generato
 
 ### 2.5 Streaming Event Schema
 
-Single unified Kafka topic `stock_market_events` with an `event_type` discriminator:
+Single unified Kafka topic `stock_market_events_v3` with an `event_type`
+discriminator. The generator creates it with four ticker-keyed partitions and
+`retention.ms=-1`, which preserves the historical event-time replay:
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -97,17 +102,19 @@ Implemented in `generator/generators.py:Generator.generate_streaming_events()`.
 
 ## 3. Configuration
 
-See `config/generator.yaml` for all parameters. Key sections:
+See `config/generator.yaml` for all parameters. The submitted reference
+configuration is:
 
 ```yaml
 # Universe
-n_tickers: 50               # ~400 for full HOSE
+n_tickers: 400
 vn30_count: 30
 vn30_volume_share: 0.80     # skew control
 industry_value_share:
   banking: 0.35
   real_estate: 0.25
-days_history: 30            # 180 for full simulation
+days_history: 180
+old_schema_share: 0.60
 trading_calendar: "HOSE"
 price_limit_pct: {HOSE: 0.07, HNX: 0.10, UPCOM: 0.15}
 
@@ -122,12 +129,23 @@ burst_windows: ["09:00-09:15", "14:30-14:45"]
 late_arrival_rate: 0.12
 late_delay_sec_min_max: [5, 45]
 duplicate_rate_stream: 0.015
+stream_days: 1
+kafka_topic: "stock_market_events_v3"
+kafka_partitions: 4
+kafka_retention_ms: -1
 
 # Reproducibility
 random_seed: 42
 ```
 
 Drift config in `config/drift.yaml` (see Section 5).
+
+![Generator seed-42 configuration](images/03_generator_config.png)
+
+*Figure 1 — The actual YAML used for the evidence run: 400 tickers, 180
+trading days, v1/v2 boundary, 2% offline duplicates, 12% configured late
+probability, 1.5% stream duplicates, ×25 auction bursts, four Kafka
+partitions, and seed 42.*
 
 ## 4. Data Problems Injected
 
@@ -146,6 +164,13 @@ Implementation:
 - Duplicates: `generator/problems.py:inject_duplicates()` — duplicates `rate` fraction of rows, identical across all columns
 - `value` and `foreign_room` columns are only populated for rows where `trade_date >= schema_change_date` in `generator/generators.py:generate_ohlcv()`
 
+![Offline generator quality](images/01_generator_offline_quality.png)
+
+*Figure 2 — Seed-42 offline quality output. It shows 73,440 input rows,
+72,000 distinct ticker/date keys, VN30 volume share 80.1%, 44,043 v1 rows
+with structurally missing `foreign_room` and `value`, and 1,440 injected
+duplicates (2.0%).*
+
 ### 4.2 Streaming Problems
 
 | Problem | Parameter | Config Value | Verification Method | Why Chosen |
@@ -158,6 +183,14 @@ Implementation:
 - Burst: multiplier applied to `base_events_per_min` during burst windows in `generate_streaming_events()`
 - Late arrivals: `created_ts = event_timestamp + random(5, 45) seconds` for 12% of events
 - Stream duplicates: `inject_stream_duplicates()` — exact copies of randomly selected events, shuffled back into the stream
+
+![Streaming generator quality](images/02_generator_stream_quality.png)
+
+*Figure 3 — Streaming quality output: 197,925 emitted records, 2,925 replayed
+event IDs (1.5%), 200 events/min baseline, ×25 ATO/ATC burst configuration,
+and a measured peak of 5,243 events/min. The configured base late probability
+is 12%; the measured 17.2% is higher because the implementation multiplies
+late probability during auction bursts and the report includes replays.*
 
 ### 4.3 Cross-Consistency Guarantee
 
@@ -216,7 +249,8 @@ smallcap_amplifier: 1.3             # non-VN30 tickers drift harder
 
 ### 5.3 Drift Validation Report
 
-Auto-generated at `data/drift_validation_report.csv` by `jobs/gold/drift.py:generate_drift_report()`:
+Auto-generated at `data/gold/drift_validation_report.csv` by
+`jobs/gold/drift.py:generate_drift_report()`:
 
 ```
 date         | feature_name              | mean   | psi_vs_baseline | drift_status
@@ -236,16 +270,32 @@ Before any pipeline touches the data, the generator writes to separate landing s
 |---------------|-----------|---------|---------|
 | `landing-vendor-offline/` | MinIO (Parquet) | End-of-day file drop | `ohlcv_daily`, `foreign_flow_daily`, `corporate_actions`, `financial_ratios` partitioned by `run_date` |
 | `vendor_db` | PostgreSQL | Batch DB-extract (JDBC pull) | `tickers`, `corporate_actions` (reference tables) |
-| `stock_market_events` | Kafka topic | Real-time event stream | Trade, quote, index_update events |
+| `stock_market_events_v3` | Kafka topic | Real-time event stream | Trade, quote, index_update events |
 | `events/yyyy-mm-dd/HH/` | JSONL file-sink | Vendor replay/audit log | Same events as Kafka, partitioned by date/hour |
 
 This landing stage matters for grading: **Bronze ingestion must demonstrate pulling from an external boundary**, not just reading a folder the pipeline wrote itself. The Bronze job handles connection/credentials, partial drops, and "vendor schema" exactly as it would with a real third-party system.
 
 Implemented in `generator/writers.py`: `write_parquet_landing()`, `write_to_postgres()`, `write_to_kafka()`, `write_jsonl()`.
 
+![MinIO physical schema versions](images/04_minio_schema_versions.png)
+
+*Figure 4 — MinIO bucket `landing-vendor-offline`, run date 2026-07-23,
+showing both physical `schema_version=1` and `schema_version=2` directories
+under `ohlcv_daily`. The quality report above proves which fields are absent
+from v1; an object-browser folder view alone does not prove column absence.*
+
+![MinIO trade-date partition](images/05_minio_physical_partitions.png)
+
+*Figure 5 — A v1 physical partition at
+`schema_version=1/trade_date=2025-01-20` containing
+`part-00000.parquet`. This proves that landing data is persisted outside the
+Bronze tables with version/date partitioning.*
+
 ## 7. Quality Report
 
-Auto-generated per run by `generator/writers.py:generate_quality_report()`, output to `data/quality_report.md`:
+Auto-generated per run by `generator/writers.py:generate_quality_report()`,
+with the configured output
+`docs/evidence/generator_quality_report.md`:
 
 - **Skew distribution** — VN30 volume share %, total volume
 - **Cardinality** — unique `ticker_id`, unique `(ticker_id, trade_date)` groups
@@ -257,9 +307,9 @@ Auto-generated per run by `generator/writers.py:generate_quality_report()`, outp
 
 | Type | Format | Location | Pattern |
 |------|--------|----------|---------|
-| Offline | Parquet (partitioned by run_date) | `data/landing/run_date=YYYY-MM-DD/` | End-of-day file drop |
+| Offline | Parquet (local staging and MinIO object copy) | `data/landing/run_date=YYYY-MM-DD/` and `landing-vendor-offline/run_date=YYYY-MM-DD/` | End-of-day file drop |
 | Reference | PostgreSQL | `vendor_db` (tickers, corporate_actions) | Batch DB-extract |
-| Streaming | JSON → Kafka + JSONL file-sink | `stock_market_events` topic + `data/events/` | Real-time events + replay audit log |
+| Streaming | JSON → Kafka + JSONL file-sink | `stock_market_events_v3` topic + `data/events/` | Real-time events + replay audit log |
 
 ## 9. CLI Usage
 

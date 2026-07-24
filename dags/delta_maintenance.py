@@ -1,3 +1,5 @@
+"""Airflow maintenance DAG: compact and cluster weekly Delta tables."""
+
 # =============================================================================
 # Airflow DAG: Delta Maintenance (weekly compaction + Z-order)
 # =============================================================================
@@ -26,11 +28,12 @@ with DAG(
     catchup=False,
     tags=["maintenance", "delta", "gold"],
 ) as dag:
-
     GOLD_DIR = os.getenv("GOLD_DIR", "data/gold")
 
     def run_optimize(**context):
+        """Invoke the shared Delta maintenance job."""
         from jobs.gold.maintenance import run_maintenance
+
         run_maintenance(gold_dir=GOLD_DIR)
 
     t_optimize = PythonOperator(

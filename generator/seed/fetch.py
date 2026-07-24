@@ -19,27 +19,29 @@ def fetch_and_freeze():
     try:
         from vnstock.api.listing import Listing
 
-        l = Listing()
-        symbols = l.all_symbols()
+        listing = Listing()
+        symbols = listing.all_symbols()
 
         # Get exchange mapping
-        exch_df = l.symbols_by_exchange("HOSE")
+        exch_df = listing.symbols_by_exchange("HOSE")
         exch_df = exch_df.drop_duplicates(subset="symbol")
-        exch_map = dict(zip(exch_df["symbol"], exch_df["exchange"]))
+        exch_map = dict(zip(exch_df["symbol"], exch_df["exchange"], strict=False))
 
         records = []
         for _, row in symbols.iterrows():
             sym = row["symbol"]
-            records.append({
-                "ticker_id": sym,
-                "ticker": sym,
-                "company_name": str(row.get("organ_name", sym)),
-                "exchange": exch_map.get(sym, "HOSE"),
-                "icb_l1": "",
-                "icb_l2": "",
-                "listing_date": "2020-01-01",
-                "is_active": True,
-            })
+            records.append(
+                {
+                    "ticker_id": sym,
+                    "ticker": sym,
+                    "company_name": str(row.get("organ_name", sym)),
+                    "exchange": exch_map.get(sym, "HOSE"),
+                    "icb_l1": "",
+                    "icb_l2": "",
+                    "listing_date": "2020-01-01",
+                    "is_active": True,
+                }
+            )
 
         with open(SEED_FILE, "w") as f:
             json.dump(records, f, ensure_ascii=False, indent=2)

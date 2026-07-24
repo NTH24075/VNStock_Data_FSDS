@@ -1,0 +1,22 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "feat_ticker_daily.v1",
+  "description": "Point-in-time daily ticker features — grain: ticker and trading date.",
+  "type": "object",
+  "required": [
+    "ticker_id",
+    "trade_date",
+    "event_timestamp",
+    "created_ts"
+  ],
+  "properties": {
+    "ticker_id": { "type": "string" },
+    "trade_date": { "type": "string", "format": "date" },
+    "event_timestamp": { "type": "string", "format": "date-time" },
+    "created_ts": { "type": "string", "format": "date-time" },
+    "f_ticker_return_5d": { "type": ["number", "null"] },
+    "f_ticker_volatility_20d": { "type": ["number", "null"] },
+    "f_ticker_ma20_gap": { "type": ["number", "null"] },
+    "f_ticker_foreign_net_ratio_10d": { "type": ["number", "null"] }
+  }
+}

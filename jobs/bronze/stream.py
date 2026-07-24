@@ -1,4 +1,4 @@
-"""Bronze streaming ingestion — Kafka stock_market_events -> Delta raw_market_events.
+"""Bronze streaming ingestion — configured Kafka topic -> Delta raw_market_events.
 
 Continuous append-only with Kafka offset metadata, per 02_schema_design.md Section 7.
 """
@@ -7,7 +7,7 @@ import logging
 import os
 
 from pyspark.sql import functions as F
-from pyspark.sql.types import LongType, TimestampType
+from pyspark.sql.types import LongType
 
 from jobs.spark_session import get_spark
 
@@ -15,21 +15,26 @@ logger = logging.getLogger(__name__)
 
 
 def run_stream_ingest(
-    kafka_broker: str = "kafka:9092",
-    topic: str = "stock_market_events",
+    kafka_broker: str = "kafka:29092",
+    topic: str = "stock_market_events_v3",
     bronze_dir: str = "data/bronze",
-    checkpoint_dir: str = "data/checkpoints/bronze_stream",
+    checkpoint_dir: str = "data/bronze/_checkpoints/stream",
+    starting_offsets: str = "latest",
+    available_now: bool = False,
 ):
-    spark = get_spark("bronze_stream", {
-        "spark.jars.packages": "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0",
-    })
+    """Start checkpointed Kafka ingestion into append-only Bronze Delta."""
+    spark = get_spark(
+        "bronze_stream",
+        {
+            "spark.jars.packages": "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.3",
+        },
+    )
 
     raw = (
-        spark.readStream
-        .format("kafka")
+        spark.readStream.format("kafka")
         .option("kafka.bootstrap.servers", kafka_broker)
         .option("subscribe", topic)
-        .option("startingOffsets", "latest")
+        .option("startingOffsets", starting_offsets)
         .option("failOnDataLoss", "false")
         .load()
     )
@@ -39,9 +44,7 @@ def run_stream_ingest(
         F.col("offset").cast(LongType()).alias("source_offset"),
         F.col("partition").cast(LongType()).alias("source_partition"),
         F.col("topic").alias("source_topic"),
-        F.from_unixtime(F.col("timestamp").cast(LongType()) / 1000)
-         .cast(TimestampType())
-         .alias("kafka_ts"),
+        F.col("timestamp").alias("kafka_ts"),
         F.col("key").cast("string").alias("kafka_key"),
         F.current_timestamp().alias("_ingested_at"),
     )
@@ -52,13 +55,20 @@ def run_stream_ingest(
     logger.info("Starting bronze stream: kafka=%s/%s -> delta=%s", kafka_broker, topic, out_path)
     logger.info("Checkpoint dir: %s", ckpt)
 
-    query = (
-        parsed.writeStream
-        .format("delta")
+    writer = (
+        parsed.writeStream.format("delta")
         .outputMode("append")
         .option("checkpointLocation", ckpt)
-        .trigger(processingTime="30 seconds")
-        .start(out_path)
     )
+    writer = (
+        writer.trigger(availableNow=True)
+        if available_now
+        else writer.trigger(processingTime="30 seconds")
+    )
+    try:
+        query = writer.start(out_path)
+    except Exception:
+        spark.stop()
+        raise
 
     return spark, query

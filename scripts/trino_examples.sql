@@ -28,7 +28,7 @@ ORDER BY avg_volume DESC
 LIMIT 10;
 
 -- 5. Cross-source JOIN: Delta Gold + PostgreSQL reference data
--- Joins fact_daily_price (Delta/MinIO) with tickers (PostgreSQL vendor_db)
+-- Joins fact_daily_price (Delta/MinIO) with tickers (PostgreSQL public schema)
 SELECT
     f.ticker_id,
     t.company_name,
@@ -38,7 +38,7 @@ SELECT
     f.close,
     f.volume
 FROM delta."gold_stock".fact_daily_price f
-JOIN postgres.vendor_db.tickers t ON f.ticker_id = t.ticker_id
+JOIN postgres.public.tickers t ON f.ticker_id = t.ticker_id
 WHERE f.trade_date = DATE '2025-07-15'
   AND t.is_active = TRUE
 ORDER BY f.volume DESC
@@ -51,7 +51,7 @@ SELECT
     ROUND(AVG((f.close - f.open) / f.open * 100), 2) AS avg_daily_return_pct,
     ROUND(SUM(f.volume), 0) AS total_volume
 FROM delta."gold_stock".fact_daily_price f
-JOIN postgres.vendor_db.tickers t ON f.ticker_id = t.ticker_id
+JOIN postgres.public.tickers t ON f.ticker_id = t.ticker_id
 WHERE f.trade_date = DATE '2025-07-15'
 GROUP BY t.icb_l1
 ORDER BY total_volume DESC;

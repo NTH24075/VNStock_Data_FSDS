@@ -1,0 +1,151 @@
+version: 1
+lineage:
+  - entity:
+      name: vnstock.bronze.raw_ohlcv_daily
+      type: dataset
+      env: DEV
+      platform: delta-lake
+    upstream:
+      - entity:
+          name: landing-vendor-offline/ohlcv_daily
+          type: dataset
+          env: DEV
+          platform: s3
+
+  - entity:
+      name: vnstock.bronze.raw_market_events
+      type: dataset
+      env: DEV
+      platform: delta-lake
+    upstream:
+      - entity:
+          name: stock_market_events_v3
+          type: dataset
+          env: DEV
+          platform: kafka
+
+  - entity:
+      name: vnstock.silver.stg_daily_price
+      type: dataset
+      env: DEV
+      platform: delta-lake
+    upstream:
+      - entity:
+          name: vnstock.bronze.raw_ohlcv_daily
+          type: dataset
+          env: DEV
+          platform: delta-lake
+
+  - entity:
+      name: vnstock.silver.stg_trades
+      type: dataset
+      env: DEV
+      platform: delta-lake
+    upstream:
+      - entity:
+          name: vnstock.bronze.raw_market_events
+          type: dataset
+          env: DEV
+          platform: delta-lake
+
+  - entity:
+      name: vnstock.gold.fact_daily_price
+      type: dataset
+      env: DEV
+      platform: delta-lake
+    upstream:
+      - entity:
+          name: vnstock.silver.stg_daily_price
+          type: dataset
+          env: DEV
+          platform: delta-lake
+      - entity:
+          name: vnstock.gold.dim_ticker
+          type: dataset
+          env: DEV
+          platform: delta-lake
+      - entity:
+          name: vnstock.gold.dim_date
+          type: dataset
+          env: DEV
+          platform: delta-lake
+
+  - entity:
+      name: vnstock.gold.obt_ticker_daily_performance
+      type: dataset
+      env: DEV
+      platform: delta-lake
+    upstream:
+      - entity:
+          name: vnstock.gold.fact_daily_price
+          type: dataset
+          env: DEV
+          platform: delta-lake
+      - entity:
+          name: vnstock.gold.fact_foreign_flow
+          type: dataset
+          env: DEV
+          platform: delta-lake
+
+  - entity:
+      name: vnstock.gold.feat_ticker_daily
+      type: dataset
+      env: DEV
+      platform: delta-lake
+    upstream:
+      - entity:
+          name: vnstock.gold.fact_daily_price
+          type: dataset
+          env: DEV
+          platform: delta-lake
+      - entity:
+          name: vnstock.gold.fact_foreign_flow
+          type: dataset
+          env: DEV
+          platform: delta-lake
+
+  - entity:
+      name: vnstock.gold.feat_stream_intraday
+      type: dataset
+      env: DEV
+      platform: delta-lake
+    upstream:
+      - entity:
+          name: vnstock.silver.stg_trades
+          type: dataset
+          env: DEV
+          platform: delta-lake
+
+  - entity:
+      name: vnstock.gold.feat_ticker_unified
+      type: dataset
+      env: DEV
+      platform: delta-lake
+    upstream:
+      - entity:
+          name: vnstock.gold.feat_ticker_daily
+          type: dataset
+          env: DEV
+          platform: delta-lake
+      - entity:
+          name: vnstock.gold.feat_stream_intraday
+          type: dataset
+          env: DEV
+          platform: delta-lake
+
+  - entity:
+      name: vnstock.gold.ml_ticker_training
+      type: dataset
+      env: DEV
+      platform: delta-lake
+    upstream:
+      - entity:
+          name: vnstock.gold.feat_ticker_daily
+          type: dataset
+          env: DEV
+          platform: delta-lake
+      - entity:
+          name: vnstock.gold.ml_ticker_label
+          type: dataset
+          env: DEV
+          platform: delta-lake

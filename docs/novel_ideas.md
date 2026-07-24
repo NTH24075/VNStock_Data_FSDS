@@ -1,6 +1,5 @@
 # Novel Ideas
 
-> 10 points total (5 each). Document idea + proof it worked.
 > Ideas must go beyond EDAI curriculum (M1-M12).
 
 ---
@@ -17,31 +16,56 @@
 - Trino container in `docker-compose.yml` (port 8083)
 - Catalog files: `docker/trino/catalog/delta.properties` (MinIO-backed Delta) + `postgres.properties` (vendor_db)
 - Query examples: `scripts/trino_examples.sql` demonstrates cross-source queries (e.g., JOIN Delta Gold tables with PostgreSQL ticker reference)
-- Gold layer tables are exposed through Trino for BI tool access (Superset/Metabase)
+- Gold layer tables are exposed through Trino for DBeaver or another BI client
 - Benefit: analysts query Gold data via SQL without needing Spark; Trino optimizes reads at the Delta file level (predicate pushdown, partition pruning)
 
-**Proof:** [screenshot] Run Trino queries from `scripts/trino_examples.sql` via Trino CLI or DBeaver connected to Trino (port 8083). Show:
-1. `SHOW CATALOGS` — showing both `delta` and `postgres` catalogs
-2. Cross-source JOIN query between `delta.gold_stock.fact_daily_price` and `postgres.vendor_db.tickers`
-3. Query plan (`EXPLAIN`) showing partition pruning and file-level skipping
+**Measured proof:** the query joins
+`delta.gold_stock.fact_daily_price` to `postgres.public.tickers` through the
+same Trino connection and returns 72,000 rows.
+
+![Trino federated Delta/PostgreSQL join](images/19_trino_federated_join.png)
+
+*Figure 1 — DBeaver SQL and result for the cross-catalog join. The connection
+tree shows the Trino `delta` and `postgres` catalogs, while the result
+`federated_rows = 72,000` matches the Gold daily-fact grain. This proves
+federation without copying PostgreSQL reference rows into the Delta fact
+table. A separate `EXPLAIN`/skipped-splits screenshot was not captured, so
+partition-pruning performance is not claimed as visual evidence.*
 
 ---
 
 ## Idea 2: Versioned Data Contracts with JSON Schema — Catch Unannounced Schema Changes Before They Corrupt Bronze
 
-**What:** Every Bronze table has a **versioned JSON Schema contract** (`contracts/*.v1.json`, `.v2.json`) that defines required columns, types, and nullability per `_schema_version`. The Bronze ingestion job validates incoming data against the contract version matching its `_schema_version` tag *before* writing to Delta. A column present in the data but absent from any known contract version (an unannounced vendor change) fails the run — this is a **contract violation**, distinct from a planned schema evolution (v1→v2).
+**What:** Key Bronze, Silver, Gold and feature datasets have versioned JSON
+Schema contracts (`contracts/*.v1.json`, `.v2.json`) that define required
+columns and types. The Bronze OHLCV job validates data against the contract
+matching its `_schema_version` before writing to Delta. A populated column
+absent from the selected contract is a **contract violation**, distinct from
+the registered v1→v2 evolution.
 
 **Why beyond EDAI:** M5 covers software testing (pytest, TDD) and M12 mentions "data validation fundamentals: circuit breaker, validation frameworks, data contracts" at concept level — but neither covers implementing a production-grade contract enforcement pattern. This idea demonstrates: JSON Schema as a lightweight alternative to Schema Registry (no Kafka dependency), versioned contract evolution, the distinction between "evolution" (planned) and "violation" (unplanned), and integration with the ingestion pipeline as a quality gate.
 
 **Implementation:**
-- Contract files: `contracts/raw_ohlcv_daily.v1.json` (6 required columns), `.v2.json` (8 required columns — added `value`, `foreign_room`)
+- Contract files: `contracts/raw_ohlcv_daily.v1.json` (7 required columns),
+  `.v2.json` (9 required columns — adds `value`, `foreign_room`)
 - `jobs/bronze/offline.py`: `validate_contract(df, contract, version)` raises `ValueError` on missing required columns
 - `load_contract(version)` reads the correct contract file per `_schema_version`
 - Generator stamps `_schema_version` per row based on `schema_change_date` — old partitions get v1, new partitions get v2
-- Delta table property `autoMerge.enabled = false` enforces that every schema change must go through the contract path
+- Shared Spark configuration
+  `spark.databricks.delta.schema.autoMerge.enabled=false` prevents silent
+  automatic Delta schema merge
 - `contracts/raw_market_events.v1.json`, `stg_trades.v1.json`, `stg_quotes.v1.json`, `feat_stream_intraday.v1.json` extend the pattern to the streaming path
 
-**Proof:** [screenshot] Show:
-1. Contract files in `contracts/` folder listing
-2. Bronze ingestion log showing validation pass: "v1: X rows OK, v2: Y rows OK"
-3. Deliberate contract violation test: modify generator to add an unregistered column, show ingestion fails with "Contract v1 violation: missing required columns {'new_column'}" in Airflow task log
+**Proof available in the repository:**
+
+1. `contracts/raw_ohlcv_daily.v1.json` requires seven v1 fields, while
+   `raw_ohlcv_daily.v2.json` requires `value` and `foreign_room` in addition.
+2. `jobs/bronze/offline.py:validate_contract()` rejects missing required
+   fields and populated unregistered fields before Bronze is written.
+3. DP1 Figure 1 in `orchestration_governance.md` shows the successful
+   `validate_contract` gate in the Airflow graph.
+4. Unit tests exercise contract loading/enforcement.
+
+No Airflow task-log screenshot of a deliberate failing contract is present.
+Therefore this idea has executable code and a successful pipeline gate, but
+not the strongest requested pass/fail UI demonstration.

@@ -1,12 +1,13 @@
-"""Bronze ingestion — landing Parquet → Bronze Delta tables."""
+"""Ingest versioned vendor Parquet drops into contract-checked Bronze Delta."""
 
 import argparse
+import glob
 import json
 import logging
 import os
 from pathlib import Path
 
-from pyspark.sql import SparkSession, DataFrame
+from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.types import StringType
 
@@ -14,36 +15,77 @@ from jobs.spark_session import get_spark
 
 logger = logging.getLogger(__name__)
 
-CONTRACTS_DIR = Path(os.getenv("CONTRACTS_DIR", str(Path(__file__).parent.parent.parent / "contracts")))
+CONTRACTS_DIR = Path(
+    os.getenv("CONTRACTS_DIR", str(Path(__file__).parent.parent.parent / "contracts"))
+)
 
 
 def load_contract(version: int) -> dict:
-    with open(CONTRACTS_DIR / f"raw_ohlcv_daily.v{version}.json") as f:
-        return json.load(f)
+    """Load the versioned OHLCV JSON contract."""
+    return load_named_contract("raw_ohlcv_daily", version)
+
+
+def load_named_contract(name: str, version: int = 1) -> dict:
+    """Load any versioned JSON contract by dataset name."""
+    with open(
+        CONTRACTS_DIR / f"{name}.v{version}.json",
+        encoding="utf-8",
+    ) as file_handle:
+        return json.load(file_handle)
 
 
 def read_landing_parquet(spark: SparkSession, data_dir: str, table: str) -> DataFrame:
-    pattern = os.path.join(data_dir, "run_date=*", table, "*.parquet")
-    import glob
-    files = glob.glob(pattern)
+    """Read both flat and Hive-partitioned vendor drops for one table."""
+    root_pattern = os.path.join(data_dir, "run_date=*", table)
+    roots = sorted(glob.glob(root_pattern))
+    files = sorted(glob.glob(os.path.join(root_pattern, "**", "*.parquet"), recursive=True))
     if not files:
-        raise FileNotFoundError(f"No Parquet files found: {pattern}")
-    return spark.read.parquet(*files)
+        raise FileNotFoundError(f"No Parquet files found: {root_pattern}")
+
+    reader = spark.read.option("mergeSchema", "true")
+    if len(roots) == 1:
+        reader = reader.option("basePath", roots[0])
+    result = reader.parquet(*files)
+    if "schema_version" in result.columns and "_schema_version" not in result.columns:
+        result = result.withColumnRenamed("schema_version", "_schema_version")
+    return result
 
 
-def validate_contract(df: DataFrame, contract: dict, version: int):
+def validate_contract(df: DataFrame, contract: dict, version: int | str):
+    """Reject missing or unregistered vendor fields for the selected version."""
+    contract_label = f"v{version}" if isinstance(version, int) else str(version)
     required = set(contract["required"])
     actual = set(df.columns)
     missing = required - actual
     if missing:
-        raise ValueError(f"Contract v{version} violation: missing required columns {missing}")
+        raise ValueError(
+            f"Contract {contract_label} violation: missing required columns {missing}"
+        )
+    declared = set(contract.get("properties", {}))
+    permitted_metadata = {
+        column for column in actual if column.startswith("_") or column in {"schema_version"}
+    }
+    unexpected = actual - declared - permitted_metadata
+    populated_unexpected = {
+        column for column in unexpected if df.filter(F.col(column).isNotNull()).limit(1).count() > 0
+    }
+    if declared and populated_unexpected:
+        raise ValueError(
+            f"Contract {contract_label} violation: unregistered columns {populated_unexpected}"
+        )
 
 
-def add_ingest_metadata(df: DataFrame, batch_id: str, schema_version: int, source_path: str = None) -> DataFrame:
+def add_ingest_metadata(
+    df: DataFrame,
+    batch_id: str,
+    schema_version: int,
+    source_path: str | None = None,
+) -> DataFrame:
+    """Attach lineage, batch, ingestion-time, and contract-version metadata."""
     result = (
         df.withColumn("_ingested_at", F.current_timestamp().cast(StringType()))
-          .withColumn("_batch_id", F.lit(batch_id))
-          .withColumn("_schema_version", F.lit(schema_version))
+        .withColumn("_batch_id", F.lit(batch_id))
+        .withColumn("_schema_version", F.lit(schema_version))
     )
     if source_path:
         result = result.withColumn("_source_path", F.lit(source_path))
@@ -51,6 +93,7 @@ def add_ingest_metadata(df: DataFrame, batch_id: str, schema_version: int, sourc
 
 
 def main():
+    """Run the offline Bronze ingestion command."""
     parser = argparse.ArgumentParser(description="Bronze ingestion")
     parser.add_argument("--data-dir", default="data/landing")
     parser.add_argument("--bronze-dir", default="data/bronze")
@@ -60,6 +103,7 @@ def main():
     spark = get_spark()
 
     from datetime import datetime
+
     batch_id_str = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     logger.info("=== Bronze: raw_ohlcv_daily ===")
@@ -76,7 +120,12 @@ def main():
             validate_contract(df_v, contract, v)
             df_v = add_ingest_metadata(df_v, batch_id_str, v)
             out_path = os.path.join(args.bronze_dir, f"raw_ohlcv_daily_v{v}")
-            df_v.write.format("delta").mode("overwrite").save(out_path)
+            (
+                df_v.write.format("delta")
+                .mode("overwrite")
+                .option("overwriteSchema", "true")
+                .save(out_path)
+            )
             logger.info("  Wrote v%d: %d rows -> %s", v, cnt, out_path)
     except FileNotFoundError as e:
         logger.warning("  Skipping ohlcv_daily: %s", e)
@@ -91,7 +140,12 @@ def main():
             logger.info("  Read %d rows, columns: %s", df.count(), df.columns)
             df = add_ingest_metadata(df, batch_id_str, 1)
             out_path = os.path.join(args.bronze_dir, delta_name)
-            df.write.format("delta").mode("overwrite").save(out_path)
+            (
+                df.write.format("delta")
+                .mode("overwrite")
+                .option("overwriteSchema", "true")
+                .save(out_path)
+            )
             logger.info("  Wrote %d rows -> %s", df.count(), out_path)
         except FileNotFoundError as e:
             logger.warning("  Skipping: %s", e)

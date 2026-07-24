@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "dim_ticker.v1",
+  "description": "SCD Type 2 ticker dimension — grain: one row per ticker version.",
+  "type": "object",
+  "required": [
+    "ticker_key",
+    "ticker_id",
+    "ticker",
+    "company_name",
+    "exchange",
+    "listing_status",
+    "is_vn30",
+    "valid_from_ts",
+    "is_current"
+  ],
+  "properties": {
+    "ticker_key": { "type": "integer" },
+    "ticker_id": { "type": "string" },
+    "ticker": { "type": "string" },
+    "company_name": { "type": "string" },
+    "exchange": { "type": "string", "enum": ["HOSE", "HNX", "UPCOM"] },
+    "listing_status": { "type": "string", "enum": ["active", "inactive"] },
+    "icb_l1": { "type": ["string", "null"] },
+    "icb_l2": { "type": ["string", "null"] },
+    "is_vn30": { "type": "boolean" },
+    "valid_from_ts": { "type": "string", "format": "date-time" },
+    "valid_to_ts": { "type": ["string", "null"], "format": "date-time" },
+    "is_current": { "type": "boolean" }
+  }
+}

@@ -7,7 +7,7 @@ RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 RUN pip install --no-cache-dir \
     pandas numpy pyarrow pyyaml minio \
-    kafka-python psycopg2-binary faker vnstock
+    kafka-python psycopg2-binary sqlalchemy
 
 # Stage 2: runtime — copy only venv + source, no build tools
 FROM python:3.12-slim AS runtime

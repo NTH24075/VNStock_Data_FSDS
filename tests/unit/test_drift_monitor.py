@@ -1,7 +1,9 @@
+from datetime import date, timedelta
+
 import numpy as np
 import pandas as pd
 
-from jobs.gold.drift import compute_psi
+from jobs.gold.drift import compute_psi, monitoring_windows
 
 
 class TestComputePsi:
@@ -32,3 +34,13 @@ class TestComputePsi:
         actual = pd.Series(data)
         psi = compute_psi(expected, actual, bins=10)
         assert psi == 0.0
+
+
+def test_monitoring_windows_uses_immediate_pre_drift_baseline():
+    start = date(2025, 9, 1)
+    dates = [start + timedelta(days=offset) for offset in range(-40, 21)]
+
+    baseline, monitoring = monitoring_windows(dates, start, baseline_size=30, stride=10)
+
+    assert baseline == dates[10:40]
+    assert monitoring == [start, start + timedelta(days=10), start + timedelta(days=20)]

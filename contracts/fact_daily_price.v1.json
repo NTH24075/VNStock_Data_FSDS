@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "fact_daily_price.v1",
+  "description": "Conformed Gold daily price fact — grain: ticker and trading date.",
+  "type": "object",
+  "required": [
+    "ticker_key",
+    "date_key",
+    "ticker_id",
+    "trade_date",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "adj_close",
+    "created_ts"
+  ],
+  "properties": {
+    "ticker_key": { "type": ["integer", "null"] },
+    "date_key": { "type": ["integer", "null"] },
+    "ticker_id": { "type": "string" },
+    "trade_date": { "type": "string", "format": "date" },
+    "open": { "type": "number", "exclusiveMinimum": 0 },
+    "high": { "type": "number", "exclusiveMinimum": 0 },
+    "low": { "type": "number", "exclusiveMinimum": 0 },
+    "close": { "type": "number", "exclusiveMinimum": 0 },
+    "volume": { "type": "integer", "minimum": 0 },
+    "value": { "type": ["number", "null"], "minimum": 0 },
+    "foreign_room": { "type": ["number", "null"], "minimum": 0 },
+    "_schema_version": { "type": "integer", "enum": [1, 2] },
+    "adj_close": { "type": "number", "exclusiveMinimum": 0 },
+    "created_ts": { "type": "string", "format": "date-time" }
+  }
+}

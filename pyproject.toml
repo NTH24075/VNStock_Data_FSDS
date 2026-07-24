@@ -9,7 +9,7 @@ include = ["generator*", "jobs*"]
 name = "vnstock-data-pipeline"
 version = "0.1.0"
 description = "Vietnam Stock Market Data Pipeline — Kỳ 1 (M1-M12)"
-requires-python = ">=3.12"
+requires-python = ">=3.10"
 dependencies = [
     "pyspark>=3.5.0",
     "deltalake>=0.18.0",
@@ -21,6 +21,7 @@ dependencies = [
     "pyyaml>=6.0",
     "kafka-python>=2.0.2",
     "psycopg2-binary>=2.9.9",
+    "sqlalchemy>=2.0.0",
     "minio>=7.2.0",
     "trino>=0.329.0",
     "vnstock>=4.0.2",
@@ -36,10 +37,14 @@ dev = [
 
 [tool.ruff]
 line-length = 100
-target-version = "py312"
+target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "SIM"]
+ignore = [
+    "E501", # Formatter handles code wrapping; long SQL/log strings stay readable.
+    "N812", # PySpark's documented convention is `functions as F`.
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
