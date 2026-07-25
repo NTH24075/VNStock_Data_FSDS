@@ -70,7 +70,7 @@ orchestration/coordination (control plane, not data plane). Arrow prefixes
 identify independent flows: **B** (batch), **S** (streaming), **C**
 (query/serving), and **M** (metadata/orchestration/governance).
 
-[![VNStock data-flow architecture](docs/images/dataflow.svg)](docs/images/dataflow.svg)
+[![VNStock data-flow architecture](docs/images/Dataflow.svg)](docs/images/Dataflow.svg)
 
 > Click the diagram to open or download the full-size SVG. Dashed component borders mark
 > adapters or automation that are not fully implemented.
