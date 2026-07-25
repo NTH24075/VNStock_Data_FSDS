@@ -40,6 +40,51 @@ Airflow integration is split into DP1 `bronze_offline_ingest`, DP2
 `silver_daily`, and DP2 `gold_dimensions_and_facts`; every DAG contains ingest
 and validation tasks.
 
+### Spark compute-layer optimization
+
+The following settings and transformations are implemented. The repository
+also contains `scripts/spark_ui_capture.py` for an identical
+baseline/optimized workload, but no Spark UI screenshots were submitted; the
+performance comparison is therefore not claimed as measured evidence.
+
+#### Skew Handling (VN30 concentration)
+
+**Problem:** 80% of volume in 30/400 tickers → `groupBy(ticker_id)` or `join` sends disproportionate rows to VN30 partitions. Visible in Spark UI as a handful of tasks with 10×+ the shuffle read.
+
+**Fixes applied:**
+
+1. **AQE skew join** — `spark.sql.adaptive.enabled=true`, `spark.sql.adaptive.skewJoin.enabled=true` (Spark 3.x automatically splits oversized partitions at runtime)
+2. **Broadcast join** for `dim_ticker` (~400 rows) against fact tables — removes shuffle on dimension side entirely
+3. Manual salting is not used in the reference implementation.
+
+Enabled in `jobs/spark_session.py:get_spark()`.
+
+#### High Cardinality
+
+**Problem:** `countDistinct(trade_id)` over millions of rows triggers full shuffle-and-sort.
+
+**Fix:** the Silver `validate_cardinality` task computes both
+`approx_count_distinct` and exact counts for ticker and the composite
+ticker/date key. This makes the approximation visible and checks it against
+the exact 72,000-key coursework-sized result. The dedup window partitions by
+`ticker_id, trade_date`; there is no explicit pre-`repartition` call.
+
+#### Schema Evolution
+
+**Problem:** Partitions before 2025-07-01 missing `foreign_room` and `value` columns. Using `mergeSchema=true` silently unions schemas, hiding the structural absence from downstream consumers.
+
+**Fix:** the landing reader uses schema merge only to load the physical files,
+then separates rows by their path-derived `_schema_version` and validates each
+subset against its own JSON contract before writing separate v1/v2 Bronze
+tables. Silver combines those tables with
+`unionByName(allowMissingColumns=True)` and adds typed null columns when
+needed. Shared Spark configuration sets
+`spark.databricks.delta.schema.autoMerge.enabled=false`.
+
+#### Duplicate Handling
+
+**Fix:** Dedup by `(ticker_id, trade_date)` keeping latest `_ingested_at` via `row_number()` window in `jobs/silver/daily.py:dedup()`.
+
 ### Spark evidence boundary
 
 The repository contains the same-workload capture runner described below, but
@@ -203,3 +248,48 @@ burst itself.*
 parallelism/checkpointing, bounded-out-of-orderness watermark assignment,
 `key_by(event_id)` stateful deduplication, late-event routing, and keyed
 five-minute `TumblingEventTimeWindows` with allowed lateness.*
+
+## Streaming optimization (Watermark, Burst, Windows)
+
+Evidence is Figures 1–5 above; these show the final running
+job, counters, checkpoints, drained-state backpressure and PyFlink code. There
+is no before/after burst backpressure capture.
+
+### Late Arrival Handling (12%, 5–45s)
+
+**Problem:** 12% of events have `created_ts` 5–45 seconds later than `event_timestamp`, clustered in burst windows. Processing-time windows assign events to wrong windows.
+
+**Fix — event-time processing with watermark:**
+- Watermark strategy: `watermark = event_timestamp - 60s` (covers 5–45s range with margin)
+- Allowed lateness: 60s on windowed aggregations — events within bound trigger window recomputation (late firing)
+- Events beyond allowed lateness: routed to **side output** (`lateOutputTag`) → `stg_events_quarantine`
+- This maps directly to: watermark strategy + allowed lateness + side output = the Flink API surface for "late events within bound merge; later events go to quarantine"
+
+### Burst Handling (200 → 5,000 events/min, ×25)
+
+**Problem:** ATO/ATC auction windows produce ×25 baseline volume, causing backpressure on single partition.
+
+**Fixes implemented:**
+
+1. Kafka topic `stock_market_events_v3` has **four** ticker-keyed partitions.
+2. Source, keyed process and window vertices each run at parallelism four,
+   giving 12 running tasks and letting all partitions consume concurrently.
+3. Checkpointed file sinks commit replay output consistently.
+
+The job has no external enrichment call and therefore no `AsyncDataStream`
+stage.
+
+### Window Processing
+
+| Feature | Window Type | Size | Slide | Key | Code |
+|---------|------------|------|-------|-----|------|
+| `f_stream_volume_5m` | Tumbling event time | 5 min | — | ticker | `jobs/flink/silver_stream.py` and Spark fallback |
+| `f_stream_trade_count_30m` | Sliding event time | 30 min | 1 min | ticker | `jobs/features/stream.py` |
+
+The generator emits no lunch-break events, so windows naturally produce no
+rows during that gap. No separate Flink session-gap operator is implemented.
+
+### Duplicate Handling (1.5%)
+
+**Fix:** Dedup by `event_id` in a `KeyedProcessFunction`; the implemented
+PyFlink path keeps the first arrival and suppresses later replays.

@@ -32,6 +32,34 @@ evidence, not the sole criterion because local cache can distort it.
 Delta schema auto-merge is disabled. Versioned contracts provide controlled
 schema evolution, while Delta transaction logs provide atomic table versions.
 
+> Evidence: Trino EXPLAIN ANALYZE output, Delta OPTIMIZE logs. Code in `jobs/gold/maintenance.py`.
+
+### Optimization 1 — Dashboard Query (sector heatmap)
+
+- **Workload:** `obt_ticker_daily_performance` filtered by date range and icb_l1
+- **Bottleneck:** Full scan across dates; small-file problem from daily incremental writes
+- **Fix:** Partition by daily `trade_date`, Z-order by `ticker_id`; scheduled `OPTIMIZE` compaction weekly via `delta_maintenance` DAG
+- **Result:** no before/after file-count, bytes-scanned or duration screenshot
+  was submitted, so no percentage improvement is claimed
+- **Trade-off:** Weekly compaction adds maintenance job; temporary 2× storage during rewrite
+
+### Optimization 2 — Intraday Momentum Query (single ticker)
+
+- **Workload:** `fact_intraday_trade` filtered by single ticker (skewed: VN30 partitions ~10× larger)
+- **Bottleneck:** Data skew in file sizes
+- **Fix:** Partition by `trade_date`, Z-order by `ticker_id`
+- **Trade-off:** Z-order maintenance cost on every compaction
+
+### Implemented in `jobs/gold/maintenance.py:run_maintenance()`
+
+Tables optimized with Z-order columns:
+- `fact_daily_price` — Z-order `ticker_id`
+- `obt_ticker_daily_performance` — Z-order `ticker_id, trade_date`
+- `feat_ticker_daily` — Z-order `ticker_id`
+- `feat_ticker_unified` — Z-order `ticker_id`
+- `ml_ticker_training` — Z-order `ticker_id`
+- `dim_ticker` — Z-order `ticker_id`
+
 ## Relational source system
 
 PostgreSQL simulates a vendor/reference database. The initialization SQL

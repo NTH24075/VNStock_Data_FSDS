@@ -64,7 +64,30 @@ docker compose exec -T airflow-scheduler airflow dags list
 
 Contracts in `contracts/` cover DP1 raw data, DP2 Silver/Gold data and DP3
 feature data. Planned OHLCV v1→v2 evolution is represented by two physical
-Parquet schemas and two contract files. Unknown populated fields fail before
+Parquet schemas and two contract files.
+
+Versioned JSON schemas — each contract specifies required columns, types, nullability, and value-range assertions per `_schema_version`:
+
+| Contract | `_schema_version` | Required Columns |
+|----------|-------------------|-----------------|
+| `raw_ohlcv_daily.v1.json` | 1 | ticker_id, trade_date, open, high, low, close, volume (7 cols) |
+| `raw_ohlcv_daily.v2.json` | 2 | + value, foreign_room (9 cols) |
+| `raw_market_events.v1.json` | — | payload_json, source_offset, source_partition, source_topic, _ingested_at |
+| `stg_trades.v1.json` | — | event_id, event_ts, ticker, price, quantity, trade_id |
+| `stg_quotes.v1.json` | — | event_id, event_ts, ticker, bid_price, ask_price |
+| `feat_stream_intraday.v1.json` | — | ticker_id, event_timestamp |
+
+### Contract Enforcement
+
+`jobs/bronze/offline.py:validate_contract()` validates incoming Parquet against the contract matching its `_schema_version` **before** writing to Delta.
+
+A column present in the data but absent from any known contract version → **"contract violation"** alert (distinct from known schema evolution, which is a planned v1→v2 change registered in the contracts folder).
+
+`spark.databricks.delta.schema.autoMerge.enabled=false` is set on the shared
+Spark session in `jobs/spark_session.py`; every schema change must go through
+the explicit contract-versioned write path.
+
+Unknown populated fields fail before
 Bronze; Gold/feature DAGs validate `dim_ticker`, `fact_daily_price` and
 `feat_ticker_daily`.
 

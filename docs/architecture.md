@@ -301,6 +301,14 @@ Contract boundary:
 - DataHub recipe publishes dataset-level lineage only; it does not publish
   Airflow runs, runtime lineage, contracts, assertions or schema entities.
 
+### D.5 Trino Federated Query (Cross-Source SQL)
+
+Trino acts as a single SQL query interface across **Delta Lake on MinIO** (object storage) and **PostgreSQL** (relational database), enabling cross-source JOINs without ETL data movement.
+
+- Trino catalog files in `docker/trino/catalog/`: `delta.properties` (MinIO-backed Delta), `postgres.properties` (vendor_db)
+- Query examples in `scripts/trino_examples.sql` — demonstrates cross-source queries (JOIN Gold Delta tables with PostgreSQL ticker reference), sector performance, OBT dashboard queries, EXPLAIN for partition pruning verification
+- Benefit: analysts query Gold data via SQL without needing Spark; Trino optimizes reads at Delta file level (predicate pushdown, partition pruning)
+
 ## E. Orchestration and schedules
 
 | DAG | Schedule/trigger | Main input → output | Retry policy | Explicit dependency boundary |

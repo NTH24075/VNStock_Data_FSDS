@@ -93,7 +93,63 @@ bucket.
 Solid arrows carry data records/files. Dashed gray arrows are restricted to
 orchestration/coordination (control plane, not data plane). Arrow prefixes
 identify independent flows: **B** (batch), **S** (streaming), **C**
-(consumption), **G** (governance), **O** (operations).
+(query/serving), and **M** (metadata/orchestration/governance).
+
+[![VNStock data-flow architecture](docs/images/dataflow.svg)](docs/images/dataflow.svg)
+
+> Click the diagram to open the full-size SVG. Dashed component borders mark
+> adapters or automation that are not fully implemented.
+
+### Numbered Data Flows
+
+#### Batch (`B`)
+
+| Flow | From → To | Data / Purpose |
+|------|-----------|----------------|
+| `B0` | Frozen ticker seed → Generator | Load the deterministic ticker universe and reference attributes |
+| `B1` | Generator → `data/landing` | Write vendor OHLCV, foreign-flow, corporate-action, and ratio Parquet files |
+| `B2` | Generator → MinIO | Mirror vendor files to `landing-vendor-offline` |
+| `B3` | Generator → PostgreSQL | Refresh ticker and corporate-action source tables |
+| `B4` | `data/landing` → Spark | Recursively read Parquet drops with schema merging |
+| `B5` | PostgreSQL → Spark | Read ticker and corporate-action tables through JDBC |
+| `B6` | Spark → `data/{bronze,silver,gold}` | Write Bronze, Silver, Gold, feature, label, and operational Delta tables |
+| `B7` | Local Gold Delta → `minio-sync-gold` | Read the local Gold Delta files through the shared volume |
+| `B8` | `minio-sync-gold` → MinIO | Mirror Gold objects to the `delta-lake/gold` prefix for serving |
+
+#### Streaming (`S`)
+
+| Flow | From → To | Data / Purpose |
+|------|-----------|----------------|
+| `S1` | Generator → Kafka | Publish ticker-keyed `trade`, `quote`, and `index_update` JSON events |
+| `S1b` | Generator → `data/events` | Keep hourly JSONL files for replay and audit |
+| `S2` | Kafka → Spark | Consume events and Kafka offsets using Structured Streaming |
+| `S3a` | Spark → Bronze Delta | Append raw market events with streaming checkpoints |
+| `S3b` | Bronze Delta → Silver Delta | Deduplicate events and write trades, quotes, and late-event quarantine |
+| `S3c` | Silver trades → Gold Delta | Build `feat_stream_intraday` event-time features |
+| `S4` | Kafka → Flink | Consume the same topic from earliest offsets for the Flink processing path |
+| `S5` | Flink → `data/flink` | Write checkpointed Silver, quarantine, and five-minute volume JSONL outputs |
+
+#### Query and Serving (`C`)
+
+| Flow | From → To | Data / Purpose |
+|------|-----------|----------------|
+| `C1` | MinIO → Trino | Read Gold Delta objects through the Delta catalog |
+| `C2` | PostgreSQL → Trino | Read vendor/reference rows through the PostgreSQL catalog |
+| `C3` | SQL client / DBeaver ↔ Trino | Submit federated SQL and return cross-source result sets |
+| `C4` | SQL client / DBeaver ↔ PostgreSQL | Run direct vendor SQL and inspect `EXPLAIN` plans |
+
+#### Metadata, Orchestration, and Governance (`M`)
+
+| Flow | From → To | Purpose |
+|------|-----------|---------|
+| `M1` | Hive Metastore → Trino | Supply Delta schema and table-location metadata |
+| `M2` | Contracts → Airflow/Spark tasks | Validate selected datasets against versioned JSON contracts |
+| `M3` | Airflow → Spark | Schedule and submit batch/streaming Spark work |
+| `M4` | Airflow → Flink | Check REST health and running-job state |
+| `M5` | Airflow ↔ PostgreSQL | Persist and read DAG, run, and task metadata |
+| `M6` | Kafka ↔ ZooKeeper | Exchange broker coordination metadata and heartbeats (supporting flow omitted from the diagram for clarity) |
+| `M7` | Lineage manifest → DataHub CLI | Load static dataset-level lineage edges |
+| `M8` | DataHub CLI → DataHub | Publish lineage metadata through REST ingestion |
 
 ## Data Layers & Naming
 
