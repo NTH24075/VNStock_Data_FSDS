@@ -102,54 +102,12 @@ identify independent flows: **B** (batch), **S** (streaming), **C**
 
 ### Numbered Data Flows
 
-#### Batch (`B`)
-
-| Flow | From → To | Data / Purpose |
-|------|-----------|----------------|
-| `B0` | Frozen ticker seed → Generator | Load the deterministic ticker universe and reference attributes |
-| `B1` | Generator → `data/landing` | Write vendor OHLCV, foreign-flow, corporate-action, and ratio Parquet files |
-| `B2` | Generator → MinIO | Mirror vendor files to `landing-vendor-offline` |
-| `B3` | Generator → PostgreSQL | Refresh ticker and corporate-action source tables |
-| `B4` | `data/landing` → Spark | Recursively read Parquet drops with schema merging |
-| `B5` | PostgreSQL → Spark | Read ticker and corporate-action tables through JDBC |
-| `B6` | Spark → `data/{bronze,silver,gold}` | Write Bronze, Silver, Gold, feature, label, and operational Delta tables |
-| `B7` | Local Gold Delta → `minio-sync-gold` | Read the local Gold Delta files through the shared volume |
-| `B8` | `minio-sync-gold` → MinIO | Mirror Gold objects to the `delta-lake/gold` prefix for serving |
-
-#### Streaming (`S`)
-
-| Flow | From → To | Data / Purpose |
-|------|-----------|----------------|
-| `S1` | Generator → Kafka | Publish ticker-keyed `trade`, `quote`, and `index_update` JSON events |
-| `S1b` | Generator → `data/events` | Keep hourly JSONL files for replay and audit |
-| `S2` | Kafka → Spark | Consume events and Kafka offsets using Structured Streaming |
-| `S3a` | Spark → Bronze Delta | Append raw market events with streaming checkpoints |
-| `S3b` | Bronze Delta → Silver Delta | Deduplicate events and write trades, quotes, and late-event quarantine |
-| `S3c` | Silver trades → Gold Delta | Build `feat_stream_intraday` event-time features |
-| `S4` | Kafka → Flink | Consume the same topic from earliest offsets for the Flink processing path |
-| `S5` | Flink → `data/flink` | Write checkpointed Silver, quarantine, and five-minute volume JSONL outputs |
-
-#### Query and Serving (`C`)
-
-| Flow | From → To | Data / Purpose |
-|------|-----------|----------------|
-| `C1` | MinIO → Trino | Read Gold Delta objects through the Delta catalog |
-| `C2` | PostgreSQL → Trino | Read vendor/reference rows through the PostgreSQL catalog |
-| `C3` | SQL client / DBeaver ↔ Trino | Submit federated SQL and return cross-source result sets |
-| `C4` | SQL client / DBeaver ↔ PostgreSQL | Run direct vendor SQL and inspect `EXPLAIN` plans |
-
-#### Metadata, Orchestration, and Governance (`M`)
-
-| Flow | From → To | Purpose |
-|------|-----------|---------|
-| `M1` | Hive Metastore → Trino | Supply Delta schema and table-location metadata |
-| `M2` | Contracts → Airflow/Spark tasks | Validate selected datasets against versioned JSON contracts |
-| `M3` | Airflow → Spark | Schedule and submit batch/streaming Spark work |
-| `M4` | Airflow → Flink | Check REST health and running-job state |
-| `M5` | Airflow ↔ PostgreSQL | Persist and read DAG, run, and task metadata |
-| `M6` | Kafka ↔ ZooKeeper | Exchange broker coordination metadata and heartbeats (supporting flow omitted from the diagram for clarity) |
-| `M7` | Lineage manifest → DataHub CLI | Load static dataset-level lineage edges |
-| `M8` | DataHub CLI → DataHub | Publish lineage metadata through REST ingestion |
+The diagram separates four concerns: offline batch movement (`B0–B8`),
+event-stream processing (`S1–S5`), query and serving paths (`C1–C4`), and
+control-plane metadata (`M1–M8`). See the
+**[architecture data-flow catalog](docs/architecture.md#d-data-flow-catalog)**
+for every numbered edge, its protocol, input/output, implementation evidence,
+and confidence level.
 
 ## Data Layers & Naming
 
@@ -196,99 +154,33 @@ All problems are reproducible (deterministic seed 42).
 
 ```
 .
-├── config/                          Generator and pipeline configuration
-│   └── generator.yaml               Universe size, data problems, drift, seed
-├── contracts/                       Versioned JSON data contracts (per schema version)
-│   ├── raw_ohlcv_daily.v1.json      Bronze v1 contract (before 2025-07-01)
-│   ├── raw_ohlcv_daily.v2.json      Bronze v2 contract (after 2025-07-01)
-│   ├── raw_market_events.v1.json    Streaming event contract
-│   ├── stg_trades.v1.json           Silver deduped trades contract
-│   ├── stg_quotes.v1.json           Silver deduped quotes contract
-│   ├── stg_events_quarantine.v1.json Quarantine table contract
-│   ├── feat_stream_intraday.v1.json Streaming feature contract
-│   ├── feat_ticker_daily.v1.json    Daily feature contract
-│   ├── dim_ticker.v1.json           SCD2 dimension contract
-│   └── fact_daily_price.v1.json     Daily fact contract
-├── dags/                            Airflow DAG definitions (orchestration)
-│   ├── bronze_offline_ingest.py     DP1: landing → raw_* Bronze tables
-│   ├── bronze_stream_ingest.py      DP1: Kafka → raw_market_events Bronze
-│   ├── silver_daily.py              DP2: raw_* → stg_* Silver (dedup, harmonize)
-│   ├── silver_stream.py             DP2: raw stream → stg_trades/quotes Silver
-│   ├── gold_dimensions_and_facts.py DP2: stg_* → dim_*, fact_*, obt_* Gold
-│   ├── feat_daily_job.py            DP3: fact_* → feat_ticker_daily
-│   ├── feat_stream_job.py           DP3: stg_trades → feat_stream_intraday
-│   ├── delta_maintenance.py         Weekly Delta OPTIMIZE compaction
-│   └── flink_silver_stream.py       Flink job submission wrapper
-├── datahub/                         Data governance
-│   ├── lineage.yml                  Dataset-level lineage edges (DP1→DP2→DP3)
-│   └── recipe.yml                   DataHub ingestion recipe
-├── docker/                          Custom Docker images and service configs
-│   ├── airflow/Dockerfile           Airflow with PySpark + Delta + project deps
-│   ├── spark/Dockerfile             Spark 3.5.3 with Delta Lake + Hadoop AWS
-│   ├── flink/Dockerfile             PyFlink with Kafka connector
-│   ├── trino/catalog/delta.properties Trino Delta Lake catalog config
-│   └── hive/hive-site.xml           Hive Metastore S3A configuration
-├── docs/                            Design docs and rubric evidence
-│   ├── generator.md                 Generation model, config, data problems
-│   ├── schema_design.md             All zones, keys, SCD2, feature time semantics
-│   ├── processing_jobs.md           Spark/Flink baseline and optimization write-ups
-│   ├── storage_optimization.md      Delta and PostgreSQL storage optimization
-│   ├── orchestration_governance.md  DP1–DP3 pipelines, contracts, lineage
-│   ├── docker.md                    Docker deployment and image optimization
-│   ├── novel_ideas.md               Trino federation + versioned contracts
-│   ├── rubric_evidence.md           Rubric-to-proof matrix and evidence inventory
-│   ├── evidence/                    Screenshot evidence and quality reports
-│   └── images/                      Architecture and diagram images
-├── generator/                       Deterministic data generator
-│   ├── main.py                      CLI entry point (--mode offline|stream)
-│   ├── generators.py                Price (random walk), volume, event generators
-│   ├── problems.py                  Duplicate, late arrival, burst, drift injection
-│   ├── calendar.py                  HOSE trading calendar with VN holidays
-│   ├── writers.py                   MinIO, PostgreSQL, Kafka, Parquet/JSONL writers
-│   ├── seed/                        Frozen real-world ticker reference data
-│   │   ├── fetch.py                 One-time vnstock API fetcher
-│   │   └── tickers_reference.json   Committed seed file (ICB, exchange, listing date)
-│   └── __init__.py                  Package init
-├── jobs/                            Processing job modules (run by Spark/Flink)
-│   ├── spark_session.py             Shared Spark session builder (Delta, AQE, MinIO)
+├── config/                 Generator and pipeline configuration
+├── contracts/              Versioned JSON data contracts
+├── dags/                   Airflow orchestration DAGs
+├── datahub/                DataHub lineage and ingestion configuration
+├── docker/                 Container images and service configuration
+│   ├── airflow/
+│   ├── flink/
+│   ├── hive/
+│   ├── spark/
+│   └── trino/
+│       └── catalog/
+├── docs/                   Design documentation and evidence
+│   ├── evidence/
+│   └── images/
+├── generator/              Deterministic offline and streaming data generator
+│   └── seed/               Frozen ticker reference data
+├── jobs/                   Spark and Flink processing jobs
 │   ├── bronze/
-│   │   ├── offline.py               Landing → raw_* ingestion with contract validation
-│   │   └── stream.py                Kafka → raw_market_events append-only ingest
-│   ├── silver/
-│   │   ├── daily.py                 Dedup, type cast, schema harmonize → stg_*
-│   │   └── stream.py                Dedup, watermark, quarantine → stg_trades/quotes
-│   ├── gold/
-│   │   ├── dimensions.py            SCD2 dim_ticker merge + static dims
-│   │   ├── facts.py                 adj_close with versioned factors, fact tables
-│   │   ├── obt.py                   Denormalized obt_ticker_daily_performance
-│   │   ├── features.py              feat_ticker_daily (trading-day windows)
-│   │   ├── labels.py                ml_ticker_label (price_up_next_3d)
-│   │   ├── drift.py                 PSI monitoring, agg_feature_health_daily
-│   │   ├── maintenance.py           Delta compaction and cleanup
-│   │   └── metadata.py              Pipeline run metadata
 │   ├── features/
-│   │   └── stream.py                feat_stream_intraday (rolling windows)
-│   └── flink/
-│       └── silver_stream.py         PyFlink event-time app (dedup + windows)
-├── scripts/                         Utility and setup scripts
-│   ├── init_vendor_db.sql           PostgreSQL schema for vendor_db
-│   ├── run_pipeline.py              Local pipeline runner for testing
-│   ├── spark_ui_capture.py          Spark UI evidence capture driver
-│   └── trino_examples.sql           Example Trino federated queries
-├── tests/                           Test suite
-│   ├── unit/
-│   │   ├── test_bronze_ingest.py    Bronze ingestion and contract validation
-│   │   ├── test_silver_transform.py Silver dedup, schema evolution handling
-│   │   ├── test_drift_monitor.py    PSI computation and alert logic
-│   │   └── test_problems.py         Data problem injection verification
-│   └── integration/
-│       └── test_pipeline.py         End-to-end pipeline integration tests
-├── Dockerfile                       Generator container (multi-stage)
-├── docker-compose.yml               Full stack: 16 services
-├── Makefile                         Build, run, test, lint, and evidence targets
-├── pyproject.toml                   Python project config, dependencies, tool settings
-├── requirements.txt                 Pinned dependency list
-└── README.md                        This file
+│   ├── flink/
+│   ├── gold/
+│   └── silver/
+├── scripts/                Setup, maintenance, and query utilities
+└── tests/                  Unit and integration tests
+    ├── fixtures/
+    ├── integration/
+    └── unit/
 ```
 
 ## Quick Start

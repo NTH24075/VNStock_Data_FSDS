@@ -93,105 +93,11 @@ Lưu ý về inventory:
 
 ## C. System architecture diagram
 
-```mermaid
-flowchart LR
-    subgraph SOURCE["Nguồn và phát sinh dữ liệu"]
-        direction TB
-        SEED["Frozen ticker seed<br/>generator/seed/*.json"]
-        GEN["Data Generator<br/>offline | stream | all"]
-        PG[("PostgreSQL vendor_db<br/>tickers + corporate_actions<br/>internal :5432 / host :5433")]
-        KAFKA["Kafka broker<br/>stock_market_events_v3<br/>internal :29092 / host :9092"]
-        ZK["ZooKeeper<br/>internal :2181"]
-    end
+[![VNStock data-flow architecture](images/dataflow.svg)](images/dataflow.svg)
 
-    subgraph ORCH["Orchestration và compute"]
-        direction TB
-        AIRFLOW["Airflow webserver + scheduler<br/>LocalExecutor · host :8082"]
-        SPARK["Spark master + worker<br/>RPC :7077 · UI :8080<br/>batch + Structured Streaming"]
-        FLINK["Flink JobManager + TaskManager<br/>REST/UI :8081<br/>PyFlink streaming"]
-    end
-
-    subgraph LAKE["Shared data volume / Lakehouse"]
-        direction TB
-        LAND[("data/landing<br/>Parquet vendor drops")]
-        REPLAY[("data/events<br/>hourly JSONL replay")]
-        DELTA[("data/bronze · data/silver · data/gold<br/>Delta tables + checkpoints")]
-        FLINKFILES[("data/flink<br/>JSONL Silver/quarantine/5-min volume")]
-    end
-
-    subgraph OBJECT["Object storage và serving"]
-        direction TB
-        SYNC["minio-sync-gold<br/>one-shot mc mirror"]
-        MINIO[("MinIO<br/>landing-vendor-offline<br/>delta-lake/gold<br/>API :9000 · UI :9001")]
-        HIVE["Hive Metastore<br/>Thrift :9083"]
-        TRINO["Trino<br/>Delta + PostgreSQL catalogs<br/>host :8083"]
-        CLIENT["External SQL client<br/>DBeaver or equivalent"]
-    end
-
-    subgraph GOV["Contracts và governance"]
-        direction TB
-        CONTRACTS["Versioned JSON contracts<br/>contracts/*.json"]
-        LINEAGE["Static lineage manifest<br/>datahub/lineage.yml"]
-        DHCLI["DataHub CLI ingest<br/>manual host process"]
-        DATAHUB["DataHub Quickstart<br/>separate deployment<br/>GMS :8084 · UI :9002"]
-    end
-
-    SEED -->|"B0 ticker reference"| GEN
-    GEN -->|"B1 Parquet: OHLCV, foreign flow, actions, ratios"| LAND
-    GEN -->|"B2 mirror vendor Parquet: landing-vendor-offline"| MINIO
-    GEN -->|"B3 SQL refresh: tickers + corporate_actions"| PG
-    LAND -->|"B4 recursive Parquet read + schema merge"| SPARK
-    PG -->|"B5 JDBC: tickers + corporate_actions"| SPARK
-    SPARK -->|"B6 overwrite Delta snapshots: Bronze → Silver → Gold"| DELTA
-    DELTA -->|"B7 read local Gold Delta files"| SYNC
-    SYNC -->|"B8 mc mirror: delta-lake/gold"| MINIO
-
-    GEN -->|"S1 ticker-keyed JSON events"| KAFKA
-    GEN -->|"S1b hourly JSONL replay/audit"| REPLAY
-    KAFKA -->|"S2 Spark Kafka source + offsets"| SPARK
-    SPARK -->|"S3 append Delta: raw events → trades/quotes/features"| DELTA
-    KAFKA -->|"S4 PyFlink source: earliest offsets"| FLINK
-    FLINK -->|"S5 checkpointed JSONL: events/quarantine/5-min volume"| FLINKFILES
-
-    MINIO -->|"C1 read Gold Delta objects"| TRINO
-    PG -->|"C2 PostgreSQL connector rows"| TRINO
-    CLIENT -->|"C3a SQL request"| TRINO
-    TRINO -->|"C3b federated result set"| CLIENT
-    CLIENT -->|"C4a direct vendor SQL / EXPLAIN"| PG
-    PG -->|"C4b result or execution plan"| CLIENT
-
-    HIVE -.->|"M1 schema + table/location metadata"| TRINO
-    CONTRACTS -.->|"M2 selected batch contract validation"| AIRFLOW
-    AIRFLOW -.->|"M3 schedule/run Spark work"| SPARK
-    AIRFLOW -.->|"M4 Flink REST health + running-job check"| FLINK
-    AIRFLOW -.->|"M5a write DAG/run/task metadata"| PG
-    PG -.->|"M5b read orchestration state"| AIRFLOW
-    ZK -.->|"M6a broker coordination metadata"| KAFKA
-    KAFKA -.->|"M6b heartbeats/coordination requests"| ZK
-    LINEAGE -.->|"M7 static dataset edges"| DHCLI
-    DHCLI -.->|"M8 REST ingest"| DATAHUB
-
-    classDef source fill:#E3F2FD,stroke:#1565C0,color:#0D47A1,stroke-width:1.5px;
-    classDef orchestration fill:#F3E5F5,stroke:#7B1FA2,color:#4A148C,stroke-width:1.5px;
-    classDef processing fill:#FFF3E0,stroke:#EF6C00,color:#E65100,stroke-width:1.5px;
-    classDef storage fill:#E8F5E9,stroke:#2E7D32,color:#1B5E20,stroke-width:1.5px;
-    classDef query fill:#E0F2F1,stroke:#00796B,color:#004D40,stroke-width:1.5px;
-    classDef governance fill:#ECEFF1,stroke:#546E7A,color:#263238,stroke-width:1.5px;
-    classDef external fill:#FFFDE7,stroke:#9E9D24,color:#827717,stroke-width:1.5px;
-
-    class SEED,GEN,PG,KAFKA,ZK source;
-    class AIRFLOW orchestration;
-    class SPARK,FLINK processing;
-    class LAND,REPLAY,DELTA,FLINKFILES,SYNC,MINIO storage;
-    class HIVE,TRINO query;
-    class CONTRACTS,LINEAGE,DHCLI,DATAHUB governance;
-    class CLIENT external;
-
-    linkStyle 0,1,2,3,4,5,6,7,8 stroke:#1565C0,stroke-width:2px,color:#1565C0;
-    linkStyle 9,10,11,12,13,14 stroke:#F4511E,stroke-width:2px,color:#F4511E;
-    linkStyle 15,16,17,18,19,20 stroke:#2E7D32,stroke-width:2px,color:#2E7D32;
-    linkStyle 21,22,23,24,25,26,27,28,29,30 stroke:#78909C,stroke-width:1.5px,color:#546E7A;
-```
+Nhấp vào sơ đồ để mở SVG ở kích thước đầy đủ. Đây là sơ đồ chuẩn dùng chung
+với README; diễn giải chi tiết cho từng cạnh được đặt tại
+[Data flow catalog](#d-data-flow-catalog).
 
 Màu đường nối:
 
