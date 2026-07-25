@@ -15,8 +15,8 @@ Orchestration (Airflow), Data Governance (DataHub).
 
 - [Business Domain](#business-domain)
 - [Architecture](#architecture)
-  - [Deployable Units](#deployable-units)
   - [Data Flow Diagram](#data-flow-diagram)
+  - [Deployable Units](#deployable-units)
   - [Numbered Data Flows](#numbered-data-flows)
 - [Data Layers & Naming](#data-layers--naming)
 - [Injected Data Problems](#injected-data-problems)
@@ -63,6 +63,18 @@ over injected issues while keeping the domain realistic. Deterministic seed
 
 ## Architecture
 
+### Data Flow Diagram
+
+Solid arrows carry data records/files. Dashed gray arrows are restricted to
+orchestration/coordination (control plane, not data plane). Arrow prefixes
+identify independent flows: **B** (batch), **S** (streaming), **C**
+(query/serving), and **M** (metadata/orchestration/governance).
+
+[![VNStock data-flow architecture](docs/images/dataflow.svg)](docs/images/dataflow.svg)
+
+> Click the diagram to open the full-size SVG. Dashed component borders mark
+> adapters or automation that are not fully implemented.
+
 ### Deployable Units
 
 Every box in the diagram below is a runnable container, cluster, or external
@@ -87,18 +99,6 @@ bucket.
 | `DBEAVER` | DBeaver | External desktop client | — | Schema inspection, Trino SQL, PostgreSQL `EXPLAIN` |
 | `DHCLI` | DataHub CLI | One-shot host process | — | Reads `lineage.yml`, publishes dataset lineage |
 | `DATAHUB` | DataHub Quickstart | Separate deployment | UI `:9002`, GMS `:8084` | Displays DP1–DP3 dataset lineage |
-
-### Data Flow Diagram
-
-Solid arrows carry data records/files. Dashed gray arrows are restricted to
-orchestration/coordination (control plane, not data plane). Arrow prefixes
-identify independent flows: **B** (batch), **S** (streaming), **C**
-(query/serving), and **M** (metadata/orchestration/governance).
-
-[![VNStock data-flow architecture](docs/images/dataflow.svg)](docs/images/dataflow.svg)
-
-> Click the diagram to open the full-size SVG. Dashed component borders mark
-> adapters or automation that are not fully implemented.
 
 ### Numbered Data Flows
 
@@ -256,14 +256,15 @@ docker compose config --quiet
 
 | Document | Content |
 |----------|---------|
+| [`docs/architecture.md`](docs/architecture.md) | Deployable units, system diagram, numbered data flows, topology, operations, and implementation gaps |
 | [`docs/generator.md`](docs/generator.md) | Generation model, configuration reference, data problems, quality report |
 | [`docs/schema_design.md`](docs/schema_design.md) | All zones (Bronze → Gold), table designs, SCD2, feature time semantics, point-in-time correctness |
-| [`docs/processing_jobs.md`](docs/processing_jobs.md) | Spark optimization (AQE, broadcast, salting, schema handling) and Flink optimization (watermark, partitioning, async I/O, windows) |
-| [`docs/storage_optimization.md`](docs/storage_optimization.md) | Delta compaction, Z-order, partitioning; Trino bloom filter, zone maps, secondary partitions |
+| [`docs/processing_jobs.md`](docs/processing_jobs.md) | Spark optimization (AQE, broadcast, skew handling, schema evolution, deduplication) and Flink event-time processing (watermarks, partitioning, checkpoints, backpressure, windows) |
+| [`docs/storage_optimization.md`](docs/storage_optimization.md) | Delta partitioning, compaction, and Z-order; PostgreSQL indexing and `EXPLAIN` evidence |
 | [`docs/orchestration_governance.md`](docs/orchestration_governance.md) | DP1–DP3 pipeline design, Airflow DAGs, data contracts, DataHub lineage |
-| [`docs/docker.md`](docs/docker.md) | Multi-stage Dockerfiles, image size optimization, stack deployment |
+| [`docs/docker.md`](docs/docker.md) | Multi-stage generator Dockerfile, measured image-size reduction, Compose deployment, and service endpoints |
 | [`docs/novel_ideas.md`](docs/novel_ideas.md) | Trino federated queries across Delta + PostgreSQL; versioned data contracts |
-| [`docs/rubric_evidence.md`](docs/rubric_evidence.md) | Rubric-to-evidence matrix, screenshot inventory, known gaps |
+| [`docs/rubric_evidence.md`](docs/rubric_evidence.md) | Rubric-to-evidence matrix, screenshot inventory, and uncaptured evidence |
 
 ### Reference Dataset (seed 42)
 

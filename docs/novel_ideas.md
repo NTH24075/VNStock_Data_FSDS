@@ -15,7 +15,7 @@
 **Implementation:**
 - Trino container in `docker-compose.yml` (port 8083)
 - Catalog files: `docker/trino/catalog/delta.properties` (MinIO-backed Delta) + `postgres.properties` (vendor_db)
-- Query examples: `scripts/trino_examples.sql` demonstrates cross-source queries (e.g., JOIN Delta Gold tables with PostgreSQL ticker reference)
+- Query examples: `../scripts/trino_examples.sql` demonstrates cross-source queries (e.g., JOIN Delta Gold tables with PostgreSQL ticker reference)
 - Gold layer tables are exposed through Trino for DBeaver or another BI client
 - Benefit: analysts query Gold data via SQL without needing Spark; Trino optimizes reads at the Delta file level (predicate pushdown, partition pruning)
 

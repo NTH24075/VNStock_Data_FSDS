@@ -113,7 +113,7 @@ run, so Airflow has no falsely running job from the interrupted session.
 
 | Rubric area | Evidence and status |
 |---|---|
-| README and deployment diagram | **Documented:** root contents, deployable-unit Mermaid diagram, numbered data/control flows and repository tree |
+| README and deployment diagram | **Documented:** root contents, deployable-unit SVG diagram, numbered data/control flows and repository tree |
 | Docker | **Partial:** Compose, multi-stage Dockerfile and recorded 195,099,639 → 158,641,463 bytes (18.7%); no screenshot |
 | Offline generator problems | **Captured:** Figures 01/03 show VN30 skew, 400 tickers, 72,000 composite keys, physical v1/v2 semantics and 2% duplicates |
 | Streaming generator problems | **Captured:** Figure 02 shows ×25 bursts, late arrivals, 1.5% duplicate IDs and 5,243 events/min peak |
