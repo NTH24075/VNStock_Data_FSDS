@@ -72,7 +72,7 @@ identify independent flows: **B** (batch), **S** (streaming), **C**
 
 [![VNStock data-flow architecture](docs/images/dataflow.svg)](docs/images/dataflow.svg)
 
-> Click the diagram to open the full-size SVG. Dashed component borders mark
+> Click the diagram to open or download the full-size SVG. Dashed component borders mark
 > adapters or automation that are not fully implemented.
 
 ### Deployable Units
