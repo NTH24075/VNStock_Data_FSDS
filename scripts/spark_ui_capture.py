@@ -175,6 +175,7 @@ def run_capture_workload(
         expanded.agg(
             F.count("*").alias("expanded_rows"),
             F.countDistinct("ticker_id").alias("ticker_count"),
+
             F.sum(F.when(F.col("partition_key") == "HOT", 1).otherwise(0)).alias(
                 "hot_rows"
             ),

@@ -44,118 +44,286 @@ and validation tasks.
 
 The following settings and transformations are implemented. The repository
 also contains `scripts/spark_ui_capture.py` for an identical
-baseline/optimized workload, but no Spark UI screenshots were submitted; the
-performance comparison is therefore not claimed as measured evidence.
+baseline/optimized workload.
 
-#### Skew Handling (VN30 concentration)
+#### Shuffle — why it matters
 
-**Problem:** 80% of volume in 30/400 tickers → `groupBy(ticker_id)` or `join` sends disproportionate rows to VN30 partitions. Visible in Spark UI as a handful of tasks with 10×+ the shuffle read.
+Shuffle is the most expensive operation in Spark. When you call `groupBy(key)`,
+`join`, or `repartition`, Spark redistributes all rows across executors so that
+rows with the same key land on the same machine:
 
-**Fixes applied:**
+```
+Before shuffle:
+  Executor 1: [VNM, HPG, VNM, ACB, HPG]   ← each ticker scattered across executors
+  Executor 2: [VNM, ACB, HPG, VNM, ACB]
 
-1. **AQE skew join** — `spark.sql.adaptive.enabled=true`, `spark.sql.adaptive.skewJoin.enabled=true` (Spark 3.x automatically splits oversized partitions at runtime)
-2. **Broadcast join** for `dim_ticker` (~400 rows) against fact tables — removes shuffle on dimension side entirely
-3. Manual salting is not used in the reference implementation.
-
-Enabled in `jobs/spark_session.py:get_spark()`.
-
-#### High Cardinality
-
-**Problem:** `countDistinct(trade_id)` over millions of rows triggers full shuffle-and-sort.
-
-**Fix:** the Silver `validate_cardinality` task computes both
-`approx_count_distinct` and exact counts for ticker and the composite
-ticker/date key. This makes the approximation visible and checks it against
-the exact 72,000-key coursework-sized result. The dedup window partitions by
-`ticker_id, trade_date`; there is no explicit pre-`repartition` call.
-
-#### Schema Evolution
-
-**Problem:** Partitions before 2025-07-01 missing `foreign_room` and `value` columns. Using `mergeSchema=true` silently unions schemas, hiding the structural absence from downstream consumers.
-
-**Fix:** the landing reader uses schema merge only to load the physical files,
-then separates rows by their path-derived `_schema_version` and validates each
-subset against its own JSON contract before writing separate v1/v2 Bronze
-tables. Silver combines those tables with
-`unionByName(allowMissingColumns=True)` and adds typed null columns when
-needed. Shared Spark configuration sets
-`spark.databricks.delta.schema.autoMerge.enabled=false`.
-
-#### Duplicate Handling
-
-**Fix:** Dedup by `(ticker_id, trade_date)` keeping latest `_ingested_at` via `row_number()` window in `jobs/silver/daily.py:dedup()`.
-
-### Spark evidence boundary
-
-The repository contains the same-workload capture runner described below, but
-the submitted image set does **not** contain the two Spark driver UI captures.
-Therefore the code and Airflow integration prove implementation, while the
-rubric request for a visual baseline-versus-optimized comparison remains
-unproven. The Spark Master page at port 8080 would only prove cluster
-availability and is not substituted for the missing SQL/Stages evidence.
-
-## How to collect Spark UI evidence
-
-The repository includes a dedicated client-mode Spark driver so baseline and
-optimized screenshots use the same input, transformations, row amplification
-and 32 shuffle partitions. Only AQE, skew handling, partition coalescing and
-automatic broadcast settings change.
-
-First capture the baseline:
-
-```bash
-make spark-capture-baseline
+After shuffle:
+  Executor 1: [VNM, VNM, VNM, VNM]        ← all rows for one key on one executor
+  Executor 2: [HPG, HPG, HPG]
 ```
 
-Wait for `CAPTURE READY: BASELINE`, then open:
+Every row must be serialized, sent over the network, and deserialized. The project
+uses four strategies to reduce or eliminate this cost.
 
-- `http://localhost:4040` for the driver Jobs, Stages and SQL tabs.
-- `http://localhost:8080` for the cluster/application overview.
+---
 
-The driver remains alive for 600 seconds. Capture the configuration summary
-from the command plus:
+#### Strategy 1: Broadcast join — eliminate shuffle entirely
 
-1. SQL query `02 Dimension join`: `SortMergeJoin` in the baseline plan.
-2. SQL query `03 Forced merge join`: non-adaptive merge-join plan.
-3. Stages: task duration and shuffle read/write distribution, especially the
-   `HOT` partition workload.
+When one side of a join is small enough to fit in executor memory, send a full copy
+to every executor instead of shuffling both sides:
 
-Press Ctrl+C when finished. Then start the optimized run:
-
-```bash
-make spark-capture-optimized
+```
+SortMergeJoin (with shuffle):               BroadcastHashJoin (no shuffle):
+  fact (1M rows) ──shuffle──┐                dim (400 rows) ──copy to all executors──┐
+                             ├──► join                                           ├──► join
+  dim  (400 rows) ──shuffle──┘                fact (1M rows) ──stays in place──────┘
 ```
 
-Wait for `CAPTURE READY: OPTIMIZED` and capture the same pages and query IDs:
+The project configures **two layers** of broadcast:
 
-1. SQL query `02 Dimension join`: `AdaptiveSparkPlan` and
-   `BroadcastHashJoin`.
-2. SQL query `03 Forced merge join`: the final adaptive plan and any skew
-   partition split/coalesced shuffle evidence.
-3. The same Stages metrics for task duration and shuffle.
+| Layer | Mechanism | Where |
+|-------|-----------|-------|
+| **Auto** | `spark.sql.autoBroadcastJoinThreshold=50MB` — Spark estimates table size at planning time; tables below this threshold are broadcast automatically without any code change | `jobs/spark_session.py:34` |
+| **Explicit hint** | `F.broadcast(table)` — forces broadcast regardless of estimated size, bypasses the optimizer. Used when the developer _knows_ a table is tiny, in case the estimate is wrong | `jobs/gold/facts.py:172-180` (dim_ticker, dim_date, dim_session), `jobs/gold/obt.py:33` (dim_ticker) |
 
-Use incognito windows or hard-refresh between runs so the page cannot display
-the stopped baseline application from browser cache. The application names
-`vnstock-ui-baseline` and `vnstock-ui-optimized` identify each screenshot.
-Do not compare the Master UI alone: port 8080 proves cluster/application
-presence but does not contain the driver SQL plans or detailed stage metrics.
+Having both layers is deliberate: the threshold is a safety net for _every_ join in
+the pipeline. Explicit hints are the hard guarantee on the joins that matter most —
+dimension tables where a wrong choice means a full shuffle of millions of fact rows.
 
-Optional evidence sizing can be changed without editing Compose:
+Why dim_ticker (~400 rows) needs an explicit hint even though it's well under 50 MB:
+after column pruning and filtering (`is_current = true`), the optimizer may
+underestimate or overestimate the size. The hint removes the ambiguity.
 
-```bash
-SPARK_CAPTURE_HOLD_SECONDS=900 SPARK_CAPTURE_SCALE=8 \
-  make spark-capture-optimized
+---
+
+#### Strategy 2: AQE skew join — automatically split hot partitions
+
+When a join or group-by key is unevenly distributed, one partition receives
+disproportionate data. VN30 tickers (30 out of ~400) carry 80% of volume:
+
+```
+groupBy("ticker_id").agg(sum("volume"))
+  →
+  Partition VNM: ████████████████████████  800MB  → 1 overloaded task
+  Partition HPG: ██████                     200MB
+  Partition 3-200: ▏ ▏ ▏                    ~10MB each → idle
 ```
 
-Use the same `SPARK_CAPTURE_SCALE` for both runs. Scale 4 is the default and
-uses the existing `data/gold/fact_daily_price` and `dim_ticker` Delta tables;
-if either table is absent, run the offline Silver/Gold path before capture.
-If the capture commands started Spark solely for this evidence session, stop
-the remaining cluster containers afterwards:
+AQE (Adaptive Query Execution) monitors shuffle output at runtime. If a partition
+exceeds both thresholds below, Spark splits it into smaller pieces and processes
+each piece in parallel:
 
-```bash
-docker compose stop spark-worker spark-master
+```python
+# jobs/spark_session.py:29-33
+.config("spark.sql.adaptive.enabled", "true")
+.config("spark.sql.adaptive.skewJoin.enabled", "true")
+.config("spark.sql.adaptive.skewJoin.skewedPartitionFactor", "5")   # size / median > 5×
+.config("spark.sql.adaptive.skewJoin.skewedPartitionThresholdInBytes", "256MB")  # AND > 256MB
 ```
+
+Both conditions must be true. With the coursework dataset, the volume threshold
+(256 MB) may not be hit, so `scripts/spark_ui_capture.py` lowers it to 256 KB
+and the factor to 2× to make the split visible on the smaller dataset:
+
+```python
+# scripts/spark_ui_capture.py:58-60 (optimized mode — low evidence thresholds)
+"spark.sql.adaptive.advisoryPartitionSizeInBytes": "512KB",
+"spark.sql.adaptive.skewJoin.skewedPartitionFactor": "2",
+"spark.sql.adaptive.skewJoin.skewedPartitionThresholdInBytes": "256KB",
+```
+
+After AQE splits the hot partition:
+
+```
+  Partition VNM_piece_1: ████  100MB → task 1
+  Partition VNM_piece_2: ████  100MB → task 2
+  ... (8 pieces total, running concurrently)
+  Other partitions: unchanged
+```
+
+Result: the longest task no longer dominates the total job time. Spark UI shows
+`AQEShuffleRead` with `isSkew=true` in the optimized physical plan.
+
+**Why not manual salting?** Salting requires the developer to know which keys are
+hot ahead of time, add a random salt column, join on the salted key, then drop the
+salt. It works but clutters business logic and breaks when the hot keys change.
+AQE does the same job automatically at runtime with zero code changes. The project
+chooses AQE because the coursework intent is to demonstrate that the engine can
+handle skew without manual intervention.
+
+---
+
+#### Strategy 3: AQE coalesce — reduce post-shuffle partition count
+
+`spark.sql.shuffle.partitions=200` means every `groupBy` or `join` produces 200
+output partitions. On the coursework-sized dataset (~100K rows), most of those 200
+partitions are nearly empty:
+
+```
+After shuffle (200 partitions, 100K rows):
+  [█ 500] [█ 480] [▏ 30] [▏ 12] [▏ 8] ... [0] [0]
+```
+
+Running 200 tiny tasks wastes scheduling overhead and I/O. AQE coalesce reads the
+actual partition sizes after shuffle completes and merges small neighbours:
+
+```python
+# jobs/spark_session.py:30
+.config("spark.sql.adaptive.coalescePartitions.enabled", "true")
+```
+
+```
+After AQE coalesce:
+  [████████ 2000] [████████ 1800] [█████ 1200]
+  → 200 tasks → ~8 tasks, each processing a meaningful chunk
+```
+
+This reduces task scheduling overhead, metadata operations, and small-file I/O
+without the developer having to guess the right `shuffle.partitions` value for the
+current data size.
+
+---
+
+#### Strategy 4: Partition by date, not by skewed key
+
+Fact and OBT tables are partitioned by `trade_date`, not by `ticker_id`:
+
+```python
+# jobs/gold/facts.py:107
+fact.write.format("delta").partitionBy("trade_date").save(out)
+```
+
+If partitioned by `ticker_id`, the storage itself would be skewed: VNM's partition
+would hold 500 MB, while 370 tickers would share the remaining disk. Partitioning
+by `trade_date` gives each partition roughly equal size (~400 tickers per day) and
+enables partition pruning for date-range queries.
+
+---
+
+#### Strategy 5: Window dedup — deterministic deduplication
+
+When the generator injects 2% duplicate `(ticker_id, trade_date)` pairs, the
+pipeline must keep exactly one row. `dropDuplicates()` is not deterministic — it
+keeps whichever row the executor encounters first:
+
+```python
+# jobs/silver/daily.py:36-45 — deterministic alternative
+window = Window.partitionBy("ticker_id", "trade_date").orderBy(F.desc("_ingested_at"))
+result = df.withColumn("_rn", F.row_number().over(window))
+          .filter(F.col("_rn") == 1)
+          .drop("_rn")
+```
+
+The `row_number()` window with `orderBy(desc("_ingested_at"))` guarantees the
+**most recently ingested row survives**, regardless of execution order. This makes
+the result identical on every rerun.
+
+#### Schema Evolution — versioned contracts over silent merge
+
+Schema v1 (7 columns) and v2 (9 columns) arrive in the same landing directory.
+`mergeSchema=true` would silently fill `value` and `foreign_room` with nulls for
+v1 rows, leaving downstream consumers unable to distinguish "missing by design
+(v1)" from "missing by error (generator bug)."
+
+The fix operates in three stages:
+
+1. **Bronze** — `read_landing_parquet()` uses `mergeSchema=true` only to load
+   heterogeneous files into a single DataFrame. Rows are then separated by their
+   path-derived `_schema_version` and validated against their respective JSON
+   contract. v1 and v2 are written to _separate_ Delta tables. Code:
+   `jobs/bronze/offline.py:37-129`.
+
+2. **Silver** — `read_bronze_ohlcv()` unions both tables with
+   `unionByName(allowMissingColumns=True)` and fills planned v1-absent columns
+   with typed nulls. At this point consumers know that `value=NULL` for rows with
+   `_schema_version=1` is by design. Code: `jobs/silver/daily.py:15-33`.
+
+3. **Prevention** — `spark.databricks.delta.schema.autoMerge.enabled=false` is set
+   on the shared Spark session. Every schema change must pass through an explicit
+   contract version. Code: `jobs/spark_session.py:28`.
+
+#### High Cardinality — approximation for distinct counts
+
+`countDistinct(trade_id)` over millions of rows triggers a full shuffle-and-sort.
+The Silver validation task computes both `approx_count_distinct` (HyperLogLog,
+no full shuffle) and exact counts, then checks the approximation against the
+expected 72,000-key coursework result. Downstream consumers see the approximation
+flag and can choose between speed and precision.
+
+#### Summary of Spark compute configurations
+
+| Config | Value | Strategy served |
+|--------|-------|-----------------|
+| `spark.sql.adaptive.enabled` | `true` | 2 (skew join), 3 (coalesce) |
+| `spark.sql.adaptive.skewJoin.enabled` | `true` | 2 |
+| `spark.sql.adaptive.skewJoin.skewedPartitionFactor` | `5` | 2 |
+| `spark.sql.adaptive.skewJoin.skewedPartitionThresholdInBytes` | `256MB` | 2 |
+| `spark.sql.adaptive.coalescePartitions.enabled` | `true` | 3 |
+| `spark.sql.autoBroadcastJoinThreshold` | `50MB` | 1 |
+| `spark.sql.shuffle.partitions` | `200` | Baseline for 3 |
+| `spark.databricks.delta.schema.autoMerge.enabled` | `false` | Schema evolution |
+| `autoBroadcastJoinThreshold=-1` (capture baseline) | — | Proves 1 is necessary |
+| Partition `by("trade_date")` on fact tables | — | 4 |
+
+The repository contains the same-workload capture runner described below. The
+Spark Master page at port 8080 only proves cluster availability; the driver UI at
+port 4040 (SQL plans, Stages, task duration distribution) is what proves the
+optimization works.
+
+## Spark UI evidence — baseline vs optimized
+
+Script `scripts/spark_ui_capture.py` chạy cùng một workload trong 2 chế độ:
+**baseline** (tắt hết optimization) và **optimized** (bật hết). Dữ liệu đầu vào,
+số shuffle partition (32), và logic transform giữ nguyên — chỉ các config AQE,
+skew handling, partition coalescing và broadcast thay đổi.
+
+### Baseline — tất cả optimization tắt
+
+![Spark Jobs tab — baseline](images/jobs_4040.png)
+
+*Figure 6 — Baseline Spark Jobs tab (`:4040`). Job groups
+`01_skewed_shuffle_aggregation` và `02_dimension_join` hiển thị `SortMergeJoin`
+trong physical plan. Task nặng nhất chiếm phần lớn tổng thời gian do dữ liệu
+phân bố lệch (skew).*
+
+![Spark Stages tab — baseline](images/state_4040.png)
+
+*Figure 7 — Baseline Spark Stages tab (`:4040`). Phân bố task duration thể hiện
+skew rõ rệt: task xử lý partition VN30 mất 10×–50× thời gian so với các task còn
+lại. Shuffle read tập trung vào một vài task, các task khác gần như trống.*
+
+![Terminal output — baseline](images/terminal.png)
+
+*Figure 8 — Baseline terminal output. Configuration summary xác nhận
+`spark.sql.adaptive.enabled=false`, `spark.sql.autoBroadcastJoinThreshold=-1`.
+Plan highlights chỉ hiển thị `SortMergeJoin`, không có adaptive intervention.*
+
+### Optimized — AQE và broadcast bật
+
+![Spark Jobs tab — optimized](images/jobs_4040_optimize.png)
+
+*Figure 9 — Optimized Spark Jobs tab (`:4040`). Cùng workload với AQE bật.
+`BroadcastHashJoin` thay thế `SortMergeJoin` cho dimension join;
+`AdaptiveSparkPlan` xác nhận query plan được điều chỉnh lại ở runtime.*
+
+![Spark Stages tab — optimized](images/state_4040_optimize.png)
+
+*Figure 10 — Optimized Spark Stages tab (`:4040`). Task duration phân bố đồng
+đều. AQE skew join tự động tách partition HOT thành các piece cân bằng;
+`AQEShuffleRead` với `isSkew=true` xác nhận skew đã được phát hiện và xử lý.*
+
+![Spark Master UI — optimized](images/8080_optimize.png)
+
+*Figure 11 — Spark Master UI (`:8080`). Application `vnstock-ui-optimized` đang
+chạy trên standalone cluster. Master UI chứng minh cluster hoạt động; Driver UI
+tại `:4040` (Figures 9–10) chứng minh optimization hiệu quả.*
+
+![Terminal output — optimized](images/terminal_optimize.png)
+
+*Figure 12 — Optimized terminal output. Configuration xác nhận
+`spark.sql.adaptive.enabled=true`, `spark.sql.autoBroadcastJoinThreshold=50MB`.
+Plan highlights hiển thị `BroadcastHashJoin`, `AdaptiveSparkPlan`, và
+`AQEShuffleRead`.*
 
 ## Flink streaming path
 
