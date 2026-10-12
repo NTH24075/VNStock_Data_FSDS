@@ -50,5 +50,8 @@ logs/
 .DS_Store
 Thumbs.db
 
+# Local analysis-tool state
+.ua/
+
 # Data files
 data/
