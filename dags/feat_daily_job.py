@@ -3,7 +3,7 @@
 # =============================================================================
 # Airflow DAG: Feature Pipeline — Daily + Labels + Drift Monitoring (DP3)
 # =============================================================================
-# Schedule: daily, after gold_dimensions_and_facts completes.
+# Schedule: triggered by the gold_dimensions_and_facts Dataset (runs only after DP2 Gold passes).
 # Trading-day window features, drift PSI monitoring, label table, training table.
 #
 # Pipeline: Ingest → Validate
@@ -14,6 +14,7 @@ import os
 from datetime import datetime, timedelta
 
 from airflow import DAG
+from airflow.datasets import Dataset
 from airflow.operators.python import PythonOperator
 
 default_args = {
@@ -26,7 +27,7 @@ with DAG(
     dag_id="feat_daily_job",
     default_args=default_args,
     start_date=datetime(2025, 7, 1),
-    schedule_interval="0 17 * * *",
+    schedule=[Dataset("vnstock://gold/daily")],
     catchup=False,
     max_active_tasks=1,
     tags=["features", "gold", "drift", "dp3"],
@@ -100,8 +101,6 @@ with DAG(
         spark = get_spark("feat_val_ts")
         try:
             path = os.path.join(GOLD_DIR, "feat_ticker_daily")
-            if not os.path.exists(path):
-                return
             df = spark.read.format("delta").load(path)
             assert "event_timestamp" in df.columns, "Missing event_timestamp column"
             assert "created_ts" in df.columns, "Missing created_ts column"
@@ -140,8 +139,6 @@ with DAG(
         spark = get_spark("feat_val_label")
         try:
             path = os.path.join(GOLD_DIR, "ml_ticker_label")
-            if not os.path.exists(path):
-                return
             df = spark.read.format("delta").load(path)
             total = df.count()
             pos = df.filter(F.col("label") == 1).count()
@@ -157,8 +154,6 @@ with DAG(
         spark = get_spark("feat_val_drift")
         try:
             path = os.path.join(GOLD_DIR, "agg_feature_health_daily")
-            if not os.path.exists(path):
-                return
             df = spark.read.format("delta").load(path)
             alerts = df.filter("alert_flag = true")
             n_alerts = alerts.count()

@@ -3,7 +3,7 @@
 import logging
 import os
 
-from pyspark.sql import DataFrame, SparkSession, Window
+from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 
 logger = logging.getLogger(__name__)
@@ -73,29 +73,20 @@ def build_dim_date(
     return dim
 
 
-def build_dim_ticker(spark: SparkSession, df: DataFrame, gold_dir: str) -> DataFrame:
-    """Apply an idempotent SCD Type 2 merge for ticker attributes."""
-    seed_path = os.getenv(
-        "SEED_PATH",
-        os.path.join(
-            os.path.dirname(__file__), "..", "..", "generator", "seed", "tickers_reference.json"
-        ),
-    )
-    tickers = df.select("ticker_id").distinct().orderBy("ticker_id")
+def build_dim_ticker(
+    spark: SparkSession,
+    df: DataFrame,
+    gold_dir: str,
+    bronze_dir: str | None = None,
+) -> DataFrame:
+    """Apply an idempotent SCD Type 2 merge using vendor ticker attributes from Bronze."""
+    bronze_dir = bronze_dir or os.getenv("BRONZE_DIR", "data/bronze")
+    tickers_path = os.path.join(bronze_dir, "raw_tickers")
+    if not os.path.exists(tickers_path):
+        raise FileNotFoundError(f"No Bronze ticker reference at {tickers_path}")
+    vendor = spark.read.format("delta").load(tickers_path)
+    tickers = df.select("ticker_id").distinct().join(vendor, on="ticker_id", how="left")
 
-    if os.path.exists(seed_path):
-        seed_df = spark.read.option("multiline", "true").json(seed_path)
-        tickers = tickers.join(seed_df, on="ticker_id", how="left")
-    else:
-        tickers = (
-            tickers.withColumn("ticker", F.col("ticker_id"))
-            .withColumn("company_name", F.lit("Unknown"))
-            .withColumn("exchange", F.lit("HOSE"))
-            .withColumn("icb_l1", F.lit(None).cast("string"))
-            .withColumn("icb_l2", F.lit(None).cast("string"))
-        )
-
-    vn30_window = Window.orderBy("ticker_id")
     incoming = tickers.select(
         F.col("ticker_id"),
         F.coalesce(F.col("ticker"), F.col("ticker_id")).alias("ticker"),
@@ -104,9 +95,9 @@ def build_dim_ticker(spark: SparkSession, df: DataFrame, gold_dir: str) -> DataF
         F.when(F.coalesce(F.col("is_active"), F.lit(True)), F.lit("active"))
         .otherwise(F.lit("inactive"))
         .alias("listing_status"),
-        F.col("icb_l1"),
-        F.col("icb_l2"),
-        (F.row_number().over(vn30_window) <= 30).alias("is_vn30"),
+        F.col("icb_industry_l1").alias("icb_l1"),
+        F.col("icb_industry_l2").alias("icb_l2"),
+        F.coalesce(F.col("vn30"), F.lit(False)).alias("is_vn30"),
     )
     out = os.path.join(gold_dir, "dim_ticker")
 

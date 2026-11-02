@@ -3,7 +3,8 @@
 # =============================================================================
 # Airflow DAG: Silver Daily Transformations (DP2 — part 1)
 # =============================================================================
-# Schedule: daily, after bronze_offline_ingest completes.
+# Schedule: triggered by the bronze_offline_ingest Dataset (runs only after DP1 passes).
+# Also lands the PyFlink stream output (stg_trades/stg_quotes) as Silver Delta.
 # Dedup, type casting, schema harmonization across the v1/v2 contract boundary.
 #
 # Pipeline: Ingest (from Bronze) → Validate
@@ -14,6 +15,8 @@ import os
 from datetime import datetime, timedelta
 
 from airflow import DAG
+from airflow.datasets import Dataset
+from airflow.operators.empty import EmptyOperator
 from airflow.operators.python import PythonOperator
 
 default_args = {
@@ -26,13 +29,14 @@ with DAG(
     dag_id="silver_daily",
     default_args=default_args,
     start_date=datetime(2025, 7, 1),
-    schedule_interval="0 16 * * *",
+    schedule=[Dataset("vnstock://bronze/offline")],
     catchup=False,
     max_active_tasks=1,
     tags=["silver", "daily", "dp2"],
 ) as dag:
     BRONZE_DIR = os.getenv("BRONZE_DIR", "data/bronze")
     SILVER_DIR = os.getenv("SILVER_DIR", "data/silver")
+    FLINK_OUTPUT_DIR = os.getenv("FLINK_OUTPUT_DIR", "data/flink/current")
 
     def dedup_ohlcv(**context):
         """Harmonize OHLCV versions, deduplicate, and attach DQ flags."""
@@ -67,9 +71,6 @@ with DAG(
         spark = get_spark("silver_ff")
         try:
             path = os.path.join(BRONZE_DIR, "raw_foreign_flow")
-            if not os.path.exists(path):
-                print("  No raw_foreign_flow — skipping")
-                return
 
             print("\n=== Silver: stg_foreign_flow ===")
             df = spark.read.format("delta").load(path)
@@ -85,6 +86,17 @@ with DAG(
         finally:
             spark.stop()
 
+    def load_flink_stream(**context):
+        """Land committed PyFlink Silver output as stg_trades/stg_quotes Delta."""
+        from jobs.silver.flink_output import load_flink_silver
+        from jobs.spark_session import get_spark
+
+        spark = get_spark("silver_flink_load")
+        try:
+            load_flink_silver(spark, FLINK_OUTPUT_DIR, SILVER_DIR)
+        finally:
+            spark.stop()
+
     # === Validate stage ===
 
     def validate_uniqueness(**context):
@@ -97,8 +109,6 @@ with DAG(
         try:
             for table in ["stg_daily_price", "stg_foreign_flow"]:
                 path = os.path.join(SILVER_DIR, table)
-                if not os.path.exists(path):
-                    continue
                 df = spark.read.format("delta").load(path)
                 total = df.count()
                 dupes = (
@@ -107,6 +117,12 @@ with DAG(
                 if dupes > 0:
                     raise ValueError(f"{table}: {dupes} duplicate (ticker_id, trade_date) groups")
                 print(f"  {table}: uniqueness OK ({total} rows)")
+            for table in ["stg_trades", "stg_quotes"]:
+                df = spark.read.format("delta").load(os.path.join(SILVER_DIR, table))
+                dupes = df.groupBy("event_id").count().filter(F.col("count") > 1).count()
+                if dupes > 0:
+                    raise ValueError(f"{table}: {dupes} duplicate event_id groups")
+                print(f"  {table}: event_id uniqueness OK ({df.count()} rows)")
         finally:
             spark.stop()
 
@@ -119,8 +135,6 @@ with DAG(
         spark = get_spark("silver_val_ref")
         try:
             stg_path = os.path.join(SILVER_DIR, "stg_daily_price")
-            if not os.path.exists(stg_path):
-                return
             df = spark.read.format("delta").load(stg_path)
             dates = [
                 r.trade_date
@@ -149,8 +163,6 @@ with DAG(
         spark = get_spark("silver_val_domain")
         try:
             path = os.path.join(SILVER_DIR, "stg_daily_price")
-            if not os.path.exists(path):
-                return
             df = spark.read.format("delta").load(path)
             df = validate_domain(df)
             dq_cols = [c for c in df.columns if c.startswith("_dq_")]
@@ -169,8 +181,6 @@ with DAG(
         spark = get_spark("silver_val_card")
         try:
             path = os.path.join(SILVER_DIR, "stg_daily_price")
-            if not os.path.exists(path):
-                return
             df = spark.read.format("delta").load(path)
             approx_tickers = df.select(F.approx_count_distinct("ticker_id")).collect()[0][0]
             exact_tickers = df.select(F.countDistinct("ticker_id")).collect()[0][0]
@@ -198,8 +208,6 @@ with DAG(
         spark = get_spark("silver_val_dup")
         try:
             path = os.path.join(SILVER_DIR, "stg_daily_price")
-            if not os.path.exists(path):
-                return
             df = spark.read.format("delta").load(path)
             total = df.count()
             dupes = df.groupBy("ticker_id", "trade_date").count().filter(F.col("count") > 1).count()
@@ -210,6 +218,7 @@ with DAG(
 
     t_dedup_ohlcv = PythonOperator(task_id="dedup_ohlcv", python_callable=dedup_ohlcv)
     t_dedup_ff = PythonOperator(task_id="dedup_foreign_flow", python_callable=dedup_foreign_flow)
+    t_flink = PythonOperator(task_id="load_flink_stream", python_callable=load_flink_stream)
     t_val_unique = PythonOperator(
         task_id="validate_uniqueness", python_callable=validate_uniqueness
     )
@@ -220,4 +229,12 @@ with DAG(
         task_id="validate_cardinality", python_callable=validate_cardinality
     )
 
-    [t_dedup_ohlcv, t_dedup_ff] >> t_val_unique >> [t_val_ref, t_val_domain, t_val_dup, t_val_card]
+    # Gold starts only when every Silver gate has passed.
+    t_publish = EmptyOperator(task_id="publish_silver", outlets=[Dataset("vnstock://silver/daily")])
+
+    (
+        [t_dedup_ohlcv, t_dedup_ff, t_flink]
+        >> t_val_unique
+        >> [t_val_ref, t_val_domain, t_val_dup, t_val_card]
+        >> t_publish
+    )

@@ -96,6 +96,7 @@ def _run_generator(spark, data_dir, n_tickers=10, days_history=60):
         "foreign_flow": len(foreign_flow),
         "corp_actions": len(corp_actions),
         "fin_ratios": len(fin_ratios),
+        "tickers": gen.tickers,
     }
 
 
@@ -138,6 +139,14 @@ class TestPipelineEndToEnd:
 
         assert os.path.exists(os.path.join(bronze_dir, "raw_ohlcv_daily_v1"))
 
+        # Vendor ticker reference, as DP1 extracts it from PostgreSQL.
+        tickers_pd = gen_result["tickers"].rename(
+            columns={"icb_l1": "icb_industry_l1", "icb_l2": "icb_industry_l2"}
+        )
+        spark.createDataFrame(tickers_pd).write.format("delta").mode("overwrite").save(
+            os.path.join(bronze_dir, "raw_tickers")
+        )
+
         # 3. Silver
         from jobs.silver.daily import dedup, read_bronze_ohlcv, validate_domain
 
@@ -162,7 +171,11 @@ class TestPipelineEndToEnd:
         df_silver = read_silver_daily(spark, silver_dir)
 
         build_dim_date(spark, df_silver, gold_dir)
-        build_dim_ticker(spark, df_silver, gold_dir)
+        build_dim_ticker(spark, df_silver, gold_dir, bronze_dir)
+        dim_ticker = spark.read.format("delta").load(os.path.join(gold_dir, "dim_ticker"))
+        expected_vn30 = set(gen_result["tickers"].query("vn30")["ticker_id"])
+        actual_vn30 = {r.ticker_id for r in dim_ticker.filter("is_current AND is_vn30").collect()}
+        assert actual_vn30 == expected_vn30
         build_fact_daily_price(spark, df_silver, gold_dir)
         assert os.path.exists(os.path.join(gold_dir, "fact_daily_price"))
 

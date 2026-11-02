@@ -46,7 +46,7 @@ def run_gold(data_dir: str, silver_dir: str) -> str:
     spark = get_spark("gold_pipeline")
     try:
         frame = read_silver_daily(spark, silver_dir)
-        build_dim_ticker(spark, frame, gold_dir)
+        build_dim_ticker(spark, frame, gold_dir, os.path.join(data_dir, "bronze"))
         build_dim_date(spark, frame, gold_dir)
         build_dim_industry(spark, gold_dir)
         build_dim_exchange(spark, gold_dir)

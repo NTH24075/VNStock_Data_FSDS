@@ -25,7 +25,7 @@ def run_feat_stream(
 
     trades_path = os.path.join(silver_dir, "stg_trades")
     if not os.path.exists(trades_path):
-        logger.warning("stg_trades not found — waiting for silver_stream")
+        logger.warning("stg_trades not found — waiting for silver_daily to load Flink output")
         return spark, None
 
     trades = (

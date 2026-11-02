@@ -105,7 +105,7 @@ All Bronze tables carry: `_ingested_at`, `_batch_id`, `_schema_version`.
 2. Dedup by `(ticker_id, trade_date)` keeping latest `_ingested_at` via `row_number()` window
 3. Domain validation: `_dq_price_positive`, `_dq_high_ge_max` (high ≥ max(open, close)), `_dq_low_le_min` (low ≤ min(open, close)), `_dq_volume_nonneg` — flagged, not dropped
 
-**Silver stream pipeline** (`dags/silver_stream.py` → `jobs/silver/stream.py`):
+**Silver stream pipeline** (`jobs/flink/silver_stream.py` → `jobs/silver/flink_output.py`, loaded by `silver_daily.load_flink_stream`):
 - Dedup by `event_id`; the PyFlink stateful path emits the first arrival and
   suppresses later replays with the same ID
 - Event-time watermark = 60s (covers 5–45s late range)
@@ -302,7 +302,8 @@ as visually proven by this screenshot.*
 | DAG | Trigger | Input → Output | Code |
 |-----|---------|----------------|------|
 | `bronze_stream_ingest` | @once | Kafka `stock_market_events_v3` → `raw_market_events` Delta | `dags/bronze_stream_ingest.py` |
-| `silver_stream` | @once | `raw_market_events` → `stg_trades` + `stg_quotes` (watermark=60s) | `dags/silver_stream.py` |
+| PyFlink `flink-silver-stream` | long-running (submitted once) | Kafka → `stg_events` JSONL (watermark=60s, dedup, quarantine) | `jobs/flink/silver_stream.py`; monitored by `dags/flink_silver_stream.py` |
+| `silver_daily.load_flink_stream` | after DP1 Dataset | Flink JSONL → `stg_trades` + `stg_quotes` Delta | `jobs/silver/flink_output.py` |
 | `feat_stream_job` | @once | `stg_trades` → `feat_stream_intraday` | `dags/feat_stream_job.py` |
 
 ### 7.3 Maintenance

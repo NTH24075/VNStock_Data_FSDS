@@ -16,13 +16,16 @@ def build_feat_ticker_daily(spark: SparkSession, gold_dir: str):
     fact = spark.read.format("delta").load(fact_path)
 
     window = Window.partitionBy("ticker_id").orderBy("trade_date")
-    return_1d = (F.col("close") - F.lag("close").over(window)) / F.lag("close").over(window)
+    return_1d = (F.col("adj_close") - F.lag("adj_close").over(window)) / F.lag("adj_close").over(
+        window
+    )
 
     df = fact.withColumn("return_1d", return_1d)
 
     df = df.withColumn(
         "f_ticker_return_5d",
-        (F.col("close") - F.lag("close", 5).over(window)) / F.lag("close", 5).over(window),
+        (F.col("adj_close") - F.lag("adj_close", 5).over(window))
+        / F.lag("adj_close", 5).over(window),
     )
 
     df = df.withColumn(
@@ -33,8 +36,8 @@ def build_feat_ticker_daily(spark: SparkSession, gold_dir: str):
         ),
     )
 
-    ma20 = F.avg("close").over(window.rowsBetween(-19, 0))
-    df = df.withColumn("f_ticker_ma20_gap", (F.col("close") - ma20) / ma20)
+    ma20 = F.avg("adj_close").over(window.rowsBetween(-19, 0))
+    df = df.withColumn("f_ticker_ma20_gap", (F.col("adj_close") - ma20) / ma20)
 
     if os.path.exists(ff_path):
         ff = spark.read.format("delta").load(ff_path)

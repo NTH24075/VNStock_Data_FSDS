@@ -43,7 +43,7 @@ The project models the **Vietnam stock market** across three exchanges:
 | Foreign flow daily | Parquet | ticker × trading day | Simulated vendor file drop |
 | Corporate actions | PostgreSQL `vendor_db` | one per action | Simulated reference system |
 | Financial ratios | Parquet | ticker × quarter | Simulated vendor file drop |
-| Ticker reference | PostgreSQL `vendor_db` + seed JSON | one per ticker | Real `vnstock` snapshot + synthetic |
+| Ticker reference | PostgreSQL `vendor_db` (loaded from the seed JSON) | one per ticker | Real `vnstock` snapshot + synthetic |
 | Intraday trades/quotes/index | Kafka topic `stock_market_events_v3` | event | Streaming generator |
 
 ### Trading Calendar
@@ -231,12 +231,17 @@ docker compose config --quiet
 
 ## Pipelines
 
+DP1 → DP2 → DP3 are chained with Airflow Datasets: `bronze_offline_ingest` runs on a
+daily cron, and each later DAG starts only after the previous one's final
+validation succeeds (`vnstock://bronze/offline` → `vnstock://silver/daily` →
+`vnstock://gold/daily`).
+
 | Pipeline | DAG | Input → Output | Key Quality Gates |
 |----------|-----|----------------|-------------------|
 | **DP1** — Bronze Ingest | `bronze_offline_ingest` | Landing Parquet + PostgreSQL → `raw_ohlcv_daily`, `raw_foreign_flow`, `raw_corporate_actions`, `raw_financial_ratios` | v1/v2 contract validation, required fields, domain checks, row counts |
 | **DP1** — Bronze Stream | `bronze_stream_ingest` | Kafka `stock_market_events_v3` → `raw_market_events` | Schema check, offset tracking |
 | **DP2** — Silver Daily | `silver_daily` | `raw_*` → `stg_daily_price`, `stg_foreign_flow`, `stg_corporate_actions` | Dedup (ticker_id, trade_date), type casting, schema harmonization, calendar validation |
-| **DP2** — Silver Stream | `silver_stream` / Flink | `raw_market_events` → `stg_trades`, `stg_quotes`, `stg_events_quarantine` | Dedup by event_id, 60s watermark, late-event quarantine |
+| **DP2** — Silver Stream | PyFlink job + `silver_daily.load_flink_stream` | Kafka → Flink JSONL → `stg_trades`, `stg_quotes`, `stg_events_quarantine` Delta | Dedup by event_id, 60s watermark, late-event quarantine; insert-only merge on event_id |
 | **DP2** — Gold | `gold_dimensions_and_facts` | `stg_*` → `dim_*`, `fact_*`, `obt_*` | SCD2 merge, adj_close versioning, referential integrity, OHLC domain checks |
 | **DP3** — Features | `feat_daily_job` | `fact_*` + `dim_date` → `feat_ticker_daily` | Trading-day window correctness, event_timestamp + created_ts |
 | **DP3** — Stream Features | `feat_stream_job` / Flink | `stg_trades` → `feat_stream_intraday` | Rolling window integrity, session-gap awareness |
