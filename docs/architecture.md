@@ -82,9 +82,8 @@ tracing hoặc alert-notification integration trong repository hiện tại.
 
 Lưu ý về inventory:
 
-- `raw_tickers` được DP1 ghi vào Bronze, nhưng `dim_ticker` hiện đọc frozen seed
-  JSON kết hợp với `stg_daily_price`; không có code downstream đọc
-  `raw_tickers`.
+- `raw_tickers` được DP1 ghi vào Bronze và được `dim_ticker` đọc trực tiếp
+  (ICB, sàn, cờ VN30) cho các ticker có trong `stg_daily_price`.
 - `raw_financial_ratios` được ingest nhưng chưa có consumer downstream.
 - `raw_corporate_actions` được `fact_daily_price` đọc trực tiếp từ Bronze; không
   có implementation tạo `stg_corporate_actions`.
@@ -110,12 +109,17 @@ Màu đường nối:
 ### C.1 Phạm vi của sơ đồ
 
 - Box là deployable service hoặc logical storage boundary có thật trong
-  code/config. Delta Lake được biểu diễn là storage format trên shared volume,
-  không phải service độc lập.
-- Spark batch và Spark Structured Streaming dùng chung cluster box nhưng có
-  flow riêng.
-- PyFlink là nhánh xử lý song song từ Kafka. Không có mũi tên từ
-  `data/flink` sang Delta vì repository chưa có adapter cho bước đó.
+  code/config. Lakehouse box là các bảng Delta trên shared volume `./data`,
+  chia theo Bronze → Silver → Gold → Features; nhãn `DP*` trên mũi tên là DAG
+  Airflow thực hiện bước đó.
+- Spark batch và Spark Structured Streaming chạy trên cùng Spark cluster, nên
+  sơ đồ vẽ chúng thành mũi tên vào/ra Lakehouse thay vì box riêng.
+- PyFlink là engine Silver stream: Kafka → PyFlink → `data/flink/current`
+  (JSONL) → `load_flink_stream` trong `silver_daily` → `stg_trades` /
+  `stg_quotes` / `stg_events_quarantine`.
+- Chữ nghiêng màu xám đánh dấu output chưa có consumer (`raw_market_events`,
+  `raw_financial_ratios`, `feat_stream_volume_5m`, replay JSONL) hoặc bước làm
+  thủ công.
 - DataHub nằm ngoài default Compose. Mũi tên governance chỉ mô tả recipe thủ
   công đã có, không khẳng định một continuous lineage pipeline.
 
