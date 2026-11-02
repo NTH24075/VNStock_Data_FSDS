@@ -281,20 +281,20 @@ skew handling, partition coalescing và broadcast thay đổi.
 
 ![Spark Jobs tab — baseline](images/jobs_4040.png)
 
-*Figure 6 — Baseline Spark Jobs tab (`:4040`). Job groups
+*Figure 1 — Baseline Spark Jobs tab (`:4040`). Job groups
 `01_skewed_shuffle_aggregation` và `02_dimension_join` hiển thị `SortMergeJoin`
 trong physical plan. Task nặng nhất chiếm phần lớn tổng thời gian do dữ liệu
 phân bố lệch (skew).*
 
 ![Spark Stages tab — baseline](images/state_4040.png)
 
-*Figure 7 — Baseline Spark Stages tab (`:4040`). Phân bố task duration thể hiện
+*Figure 2 — Baseline Spark Stages tab (`:4040`). Phân bố task duration thể hiện
 skew rõ rệt: task xử lý partition VN30 mất 10×–50× thời gian so với các task còn
 lại. Shuffle read tập trung vào một vài task, các task khác gần như trống.*
 
 ![Terminal output — baseline](images/terminal.png)
 
-*Figure 8 — Baseline terminal output. Configuration summary xác nhận
+*Figure 3 — Baseline terminal output. Configuration summary xác nhận
 `spark.sql.adaptive.enabled=false`, `spark.sql.autoBroadcastJoinThreshold=-1`.
 Plan highlights chỉ hiển thị `SortMergeJoin`, không có adaptive intervention.*
 
@@ -302,25 +302,25 @@ Plan highlights chỉ hiển thị `SortMergeJoin`, không có adaptive interven
 
 ![Spark Jobs tab — optimized](images/jobs_4040_optimize.png)
 
-*Figure 9 — Optimized Spark Jobs tab (`:4040`). Cùng workload với AQE bật.
+*Figure 4 — Optimized Spark Jobs tab (`:4040`). Cùng workload với AQE bật.
 `BroadcastHashJoin` thay thế `SortMergeJoin` cho dimension join;
 `AdaptiveSparkPlan` xác nhận query plan được điều chỉnh lại ở runtime.*
 
 ![Spark Stages tab — optimized](images/state_4040_optimize.png)
 
-*Figure 10 — Optimized Spark Stages tab (`:4040`). Task duration phân bố đồng
+*Figure 5 — Optimized Spark Stages tab (`:4040`). Task duration phân bố đồng
 đều. AQE skew join tự động tách partition HOT thành các piece cân bằng;
 `AQEShuffleRead` với `isSkew=true` xác nhận skew đã được phát hiện và xử lý.*
 
 ![Spark Master UI — optimized](images/8080_optimize.png)
 
-*Figure 11 — Spark Master UI (`:8080`). Application `vnstock-ui-optimized` đang
+*Figure 6 — Spark Master UI (`:8080`). Application `vnstock-ui-optimized` đang
 chạy trên standalone cluster. Master UI chứng minh cluster hoạt động; Driver UI
-tại `:4040` (Figures 9–10) chứng minh optimization hiệu quả.*
+tại `:4040` (Figures 4–5) chứng minh optimization hiệu quả.*
 
 ![Terminal output — optimized](images/terminal_optimize.png)
 
-*Figure 12 — Optimized terminal output. Configuration xác nhận
+*Figure 7 — Optimized terminal output. Configuration xác nhận
 `spark.sql.adaptive.enabled=true`, `spark.sql.autoBroadcastJoinThreshold=50MB`.
 Plan highlights hiển thị `BroadcastHashJoin`, `AdaptiveSparkPlan`, và
 `AQEShuffleRead`.*
@@ -379,7 +379,7 @@ The complete counter reconciliation is in
 
 ![Flink running job graph](images/10_flink_job_graph.png)
 
-*Figure 1 — Flink job `377ab5e5eb029d8f905db390c54549b6`
+*Figure 8 — Flink job `377ab5e5eb029d8f905db390c54549b6`
 is RUNNING. Three vertices at parallelism four account for 12 running tasks:
 Kafka source/timestamp-watermark assignment, keyed processing and file sinks,
 then five-minute tumbling event-time windows. The table shows 197,925 source
@@ -387,7 +387,7 @@ records and 165,668 records entering the window vertex.*
 
 ![Flink checkpoints](images/11_flink_checkpoints.png)
 
-*Figure 2 — Later checkpoint snapshot of the same job: 858 triggered and 858
+*Figure 9 — Later checkpoint snapshot of the same job: 858 triggered and 858
 completed, zero failed, zero in progress. Each of the three operators
 acknowledged 4/4 subtasks; checkpoint 858 completed in 228 ms with 12.4 MB
 state. This later UI snapshot supersedes the earlier 23-checkpoint count in
@@ -395,31 +395,31 @@ the initial verification note without changing the job result.*
 
 ![Flink source metrics and records](images/12_flink_records_watermark.png)
 
-*Figure 3 — Source-vertex Metrics view with per-subtask `numRecordsOut`,
+*Figure 10 — Source-vertex Metrics view with per-subtask `numRecordsOut`,
 watermark, Kafka offset and pending-record metric selections. The table below
 provides the aggregate 197,925 source records and 165,668 process output. The
 watermark chart in this particular capture shows an idle/minimum sentinel,
-so the final aggregate watermark is taken from the Overview graph in Figure 1
+so the final aggregate watermark is taken from the Overview graph in Figure 8
 and reconciled in `flink_v10_verification.md`; this figure alone is not used
 to claim the final watermark.*
 
 ![Flink backpressure](images/13_flink_backpressure.png)
 
-*Figure 4 — Source backpressure inspection after the finite replay drained:
+*Figure 11 — Source backpressure inspection after the finite replay drained:
 all four subtasks are OK, 0% backpressured, 100% idle and 0% busy. This proves
 the final drained state; it does not measure backpressure during the auction
 burst itself.*
 
 ![PyFlink event-time and window code](images/14_flink_watermark_window_code.png)
 
-*Figure 5 — Implemented PyFlink pipeline around lines 295–333:
+*Figure 12 — Implemented PyFlink pipeline around lines 295–333:
 parallelism/checkpointing, bounded-out-of-orderness watermark assignment,
 `key_by(event_id)` stateful deduplication, late-event routing, and keyed
 five-minute `TumblingEventTimeWindows` with allowed lateness.*
 
 ## Streaming optimization (Watermark, Burst, Windows)
 
-Evidence is Figures 1–5 above; these show the final running
+Evidence is Figures 8–12 above; these show the final running
 job, counters, checkpoints, drained-state backpressure and PyFlink code. There
 is no before/after burst backpressure capture.
 

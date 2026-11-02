@@ -108,6 +108,5 @@ capture each DP's lineage.
 
 The current recipe publishes **dataset-level lineage only**. It does not
 publish Airflow jobs, JSON contract objects, validation assertions or
-contract/schema tabs as DataHub entities. No DataHub screenshots are present
-in the submitted image set, so all six governance UI rubric items remain
-without visual proof. An empty tab is not treated as completed evidence.
+contract/schema tabs as DataHub entities. DataHub UI evidence is listed in
+[Known gaps](rubric_evidence.md#known-gaps).

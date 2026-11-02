@@ -2,7 +2,7 @@
 
 This file maps the marking rubric to reproducible project evidence. The
 reference execution below was verified on 2026-07-23 with seed 42. Nineteen
-real screenshots are embedded beside their explanations in the topic
+real screenshots plus seven Spark UI captures are embedded beside their explanations in the topic
 documents. Evidence gaps remain explicit; the project does not fabricate
 placeholder screenshots.
 
@@ -33,7 +33,7 @@ Other checked Gold results:
 - `agg_feature_health_daily`: 12 rows and 6 alerts.
 - Volatility PSI after the configured regime change: 7.9772 and 17.4301.
 - Reviewer-readable output:
-  [`../data/gold/drift_validation_report.csv`](../data/gold/drift_validation_report.csv).
+  `data/gold/drift_validation_report.csv` (generated at runtime; `data/` is git-ignored).
 
 ### Streaming path
 
@@ -118,7 +118,7 @@ run, so Airflow has no falsely running job from the interrupted session.
 | Offline generator problems | **Captured:** Figures 01/03 show VN30 skew, 400 tickers, 72,000 composite keys, physical v1/v2 semantics and 2% duplicates |
 | Streaming generator problems | **Captured:** Figure 02 shows ×25 bursts, late arrivals, 1.5% duplicate IDs and 5,243 events/min peak |
 | Landing storage | **Captured:** Figures 04/05 show MinIO schema-version and trade-date partitions |
-| Spark processing | **Partial:** capture runner, AQE/broadcast/dedup/schema code and Airflow integration exist; baseline/optimized Spark UI images absent |
+| Spark processing | **Partial captured:** Spark UI baseline vs optimized (Jobs/Stages/terminal) shows skew + broadcast; high-cardinality, schema-evolution and dedup steps are code/text only |
 | Flink processing | **Captured:** Figures 10–14 show RUNNING graph, checkpoints, records, final-state backpressure and event-time window code |
 | Lakehouse storage | **Partial:** partition/compaction/Z-order code exists; no before/after measurement screenshot |
 | PostgreSQL storage | **Captured:** Figure 18 shows `Index Scan`, condition, buffers and planning/execution time; secondary indexes remain code evidence |
@@ -134,6 +134,7 @@ run, so Airflow has no falsely running job from the interrupted session.
 |---|---|---|
 | 01–05 | [`generator.md`](generator.md) | offline/stream quality, config and MinIO landing layout |
 | 06–09 | [`orchestration_governance.md`](orchestration_governance.md) | Airflow DP1, DP2 Silver/Gold and DP3 task order/success |
+| `jobs_4040*`, `state_4040*`, `terminal*`, `8080_optimize` | [`processing_jobs.md`](processing_jobs.md) | Spark baseline vs optimized: SortMergeJoin → BroadcastHashJoin, AQE skew split |
 | 10–14 | [`processing_jobs.md`](processing_jobs.md) | Flink graph, checkpoints, metrics, drained-state backpressure and code |
 | 15–17 | [`schema_design.md`](schema_design.md) | partial Gold relationships, SCD2 rows and feature timestamps |
 | 18 | [`storage_optimization.md`](storage_optimization.md) | PostgreSQL index-backed lookup |
@@ -145,11 +146,14 @@ runs at 15:30/16:00/16:30/17:00 UTC; the separate manual run IDs in the
 reference-execution table are retained as textual execution records and are
 not assigned to those screenshots.
 
-## Uncaptured rubric evidence
+## Known gaps
+
+Single list of evidence not yet captured; topic documents link here instead of repeating it.
 
 - Docker baseline/optimized terminal or Docker Desktop image comparison.
-- Spark driver UI baseline and optimized SQL/Stages comparison on the same
-  workload.
+- Spark UI evidence for high-cardinality, schema-evolution and dedup steps.
+- Flink baseline vs optimized run (e.g. parallelism 1 vs 4) with backpressure during the burst.
+- Airflow Connections/Variables (endpoints are currently environment variables).
 - Delta compaction/Z-order before/after file and query statistics.
 - DataHub DP1–DP3 lineage, validation and contract/schema entities.
 - A full all-zone DBeaver ER diagram.
