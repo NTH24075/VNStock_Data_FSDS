@@ -1,162 +1,150 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1700" height="960" viewBox="0 0 1700 960" font-family="Inter, Segoe UI, Helvetica, Arial, DejaVu Sans, sans-serif"><defs><marker id="a2563eb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2563eb"/></marker><marker id="aea580c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#ea580c"/></marker><marker id="a16a34a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#16a34a"/></marker><marker id="a6b7280" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6b7280"/></marker></defs><rect width="1700" height="960" fill="#ffffff"/><text x="30" y="38" font-size="22" font-weight="700" fill="#0f172a">VNStock data flow</text>
-<text x="30" y="60" font-size="12" fill="#475569">Generator → Bronze → Silver → Gold → Features. Kafka feeds PyFlink, whose committed output Spark loads into Silver.</text>
-<rect x="300" y="80" width="1100" height="74" rx="8" fill="#f8fafc" stroke="#6b7280" stroke-width="1.5" stroke-dasharray="6 4"/>
-<text x="310" y="100" font-size="13" font-weight="700" fill="#0f172a">Airflow 2.9 · LocalExecutor · UI :8082</text>
-<text x="310" y="118" font-size="10" fill="#1e293b">DP1 bronze_offline_ingest (15:30) → vnstock://bronze/offline → DP2a silver_daily → vnstock://silver/daily → DP2b gold_dimensions_and_facts → vnstock://gold/daily → DP3 feat_daily_job</text>
-<text x="310" y="133" font-size="10" fill="#1e293b">@once: bronze_stream_ingest (S2) · feat_stream_job (S3b) · flink_silver_stream (M4: Flink REST health only) · weekly: delta_maintenance (OPTIMIZE / Z-ORDER Gold)</text>
-<polyline points="900,154 900,176" fill="none" stroke="#6b7280" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#a6b7280)"/>
-<text x="908" y="170" font-size="9" font-weight="600" fill="#6b7280" text-anchor="start">M3 PythonOperator → Spark spark://spark-master:7077</text>
-<rect x="30" y="230" width="180" height="60" rx="8" fill="#f1f5f9" stroke="#64748b" stroke-width="1.5"/>
-<text x="40" y="250" font-size="13" font-weight="700" fill="#0f172a">Frozen ticker seed</text>
-<text x="40" y="268" font-size="11" fill="#1e293b">tickers_reference.json</text>
-<rect x="30" y="360" width="180" height="90" rx="8" fill="#f1f5f9" stroke="#64748b" stroke-width="1.5"/>
-<text x="40" y="380" font-size="13" font-weight="700" fill="#0f172a">Data generator</text>
-<text x="40" y="398" font-size="11" fill="#1e293b">Python</text>
-<text x="40" y="414" font-size="11" fill="#1e293b">offline drops + live events</text>
-<text x="40" y="430" font-size="11" fill="#1e293b">config/generator.yaml</text>
-<polyline points="120,290 120,358" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#a2563eb)"/>
-<text x="128" y="328" font-size="10" font-weight="600" fill="#2563eb" text-anchor="start">B0</text>
-<rect x="300" y="200" width="220" height="95" rx="8" fill="#eff6ff" stroke="#2563eb" stroke-width="1.5"/>
-<text x="310" y="220" font-size="13" font-weight="700" fill="#0f172a">data/landing (Parquet)</text>
-<text x="310" y="238" font-size="10" fill="#1e293b">OHLCV v1/v2, foreign flow, ratios,</text>
-<text x="310" y="253" font-size="10" fill="#1e293b">corporate actions</text>
-<text x="310" y="268" font-size="10" fill="#64748b" font-style="italic">B2: also uploaded to MinIO</text>
-<text x="310" y="283" font-size="10" fill="#64748b" font-style="italic">landing-vendor-offline</text>
-<rect x="300" y="315" width="220" height="80" rx="8" fill="#eff6ff" stroke="#2563eb" stroke-width="1.5"/>
-<text x="310" y="335" font-size="13" font-weight="700" fill="#0f172a">PostgreSQL vendor_db</text>
-<text x="310" y="353" font-size="10" fill="#1e293b">tickers, corporate_actions</text>
-<text x="310" y="368" font-size="10" fill="#1e293b">:5432 internal · :5433 host</text>
-<text x="310" y="383" font-size="10" fill="#64748b" font-style="italic">also Airflow metadata (M5)</text>
-<rect x="300" y="570" width="220" height="70" rx="8" fill="#fff7ed" stroke="#ea580c" stroke-width="1.5"/>
-<text x="310" y="590" font-size="13" font-weight="700" fill="#0f172a">Kafka</text>
-<text x="310" y="608" font-size="10" fill="#1e293b">stock_market_events_v3</text>
-<text x="310" y="623" font-size="10" fill="#1e293b">4 partitions · trade / quote / index</text>
-<rect x="300" y="670" width="220" height="56" rx="8" fill="#fff7ed" stroke="#ea580c" stroke-width="1.5"/>
-<text x="310" y="690" font-size="13" font-weight="700" fill="#0f172a">data/events (JSONL)</text>
-<text x="310" y="708" font-size="10" fill="#64748b" font-style="italic">hourly replay copy, no consumer</text>
-<polyline points="210,405 245,405 245,245 298,245" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#a2563eb)"/>
-<polyline points="245,355 298,355" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#a2563eb)"/>
-<text x="250" y="240" font-size="9" font-weight="600" fill="#2563eb" text-anchor="start">B1·B2</text>
-<text x="250" y="350" font-size="9" font-weight="600" fill="#2563eb" text-anchor="start">B3</text>
-<polyline points="210,420 265,420 265,605 298,605" fill="none" stroke="#ea580c" stroke-width="2" marker-end="url(#aea580c)"/>
-<polyline points="265,698 298,698" fill="none" stroke="#ea580c" stroke-width="2" marker-end="url(#aea580c)"/>
-<polyline points="265,605 265,698" fill="none" stroke="#ea580c" stroke-width="2"/>
-<text x="270" y="600" font-size="9" font-weight="600" fill="#ea580c" text-anchor="start">S1</text>
-<text x="270" y="693" font-size="9" font-weight="600" fill="#ea580c" text-anchor="start">S1b</text>
-<rect x="560" y="176" width="850" height="272" rx="10" fill="#fafafa" stroke="#94a3b8" stroke-width="1.5"/>
-<text x="575" y="197" font-size="12" font-weight="700" fill="#334155">Lakehouse · Delta Lake 3.2 on shared volume ./data · Spark 3.5 batch + Structured Streaming</text>
-<rect x="580" y="250" width="180" height="175" rx="8" fill="#fdf4ec" stroke="#b45309" stroke-width="1.5"/>
-<text x="590" y="270" font-size="14" font-weight="700" fill="#0f172a">Bronze</text>
-<text x="590" y="288" font-size="10" fill="#1e293b">raw_ohlcv_daily_v1 / _v2</text>
-<text x="590" y="303" font-size="10" fill="#1e293b">raw_foreign_flow</text>
-<text x="590" y="318" font-size="10" fill="#1e293b">raw_corporate_actions</text>
-<text x="590" y="333" font-size="10" fill="#64748b" font-style="italic">raw_financial_ratios (no consumer)</text>
-<text x="590" y="348" font-size="10" fill="#1e293b">raw_tickers</text>
-<text x="590" y="363" font-size="10" fill="#1e293b">raw_market_events</text>
-<text x="590" y="378" font-size="10" fill="#64748b" font-style="italic">(S2 stream, no consumer yet)</text>
-<rect x="800" y="250" width="180" height="175" rx="8" fill="#f1f5f9" stroke="#475569" stroke-width="1.5"/>
-<text x="810" y="270" font-size="14" font-weight="700" fill="#0f172a">Silver</text>
-<text x="810" y="288" font-size="10" fill="#1e293b">stg_daily_price</text>
-<text x="810" y="303" font-size="10" fill="#1e293b">stg_foreign_flow</text>
-<text x="810" y="318" font-size="10" fill="#1e293b">stg_trades</text>
-<text x="810" y="333" font-size="10" fill="#1e293b">stg_quotes</text>
-<text x="810" y="348" font-size="10" fill="#1e293b">stg_events_quarantine</text>
-<text x="810" y="363" font-size="10" fill="#64748b" font-style="italic">dedup · domain checks ·</text>
-<text x="810" y="378" font-size="10" fill="#64748b" font-style="italic">event_id uniqueness</text>
-<rect x="1020" y="250" width="180" height="175" rx="8" fill="#fefce8" stroke="#a16207" stroke-width="1.5"/>
-<text x="1030" y="270" font-size="14" font-weight="700" fill="#0f172a">Gold</text>
-<text x="1030" y="288" font-size="10" fill="#1e293b">dim_date · dim_ticker (SCD2)</text>
-<text x="1030" y="303" font-size="10" fill="#1e293b">dim_industry / exchange / session</text>
-<text x="1030" y="318" font-size="10" fill="#1e293b">fact_daily_price</text>
-<text x="1030" y="333" font-size="10" fill="#1e293b">fact_foreign_flow</text>
-<text x="1030" y="348" font-size="10" fill="#1e293b">fact_intraday_trade</text>
-<text x="1030" y="363" font-size="10" fill="#1e293b">obt_ticker_daily_performance</text>
-<text x="1030" y="378" font-size="10" fill="#1e293b">feat_stream_intraday (S3b)</text>
-<text x="1030" y="393" font-size="10" fill="#1e293b">ops_pipeline_run</text>
-<rect x="1240" y="250" width="160" height="175" rx="8" fill="#f0fdf4" stroke="#15803d" stroke-width="1.5"/>
-<text x="1250" y="270" font-size="14" font-weight="700" fill="#0f172a">Features / ML</text>
-<text x="1250" y="288" font-size="10" fill="#1e293b">feat_ticker_daily</text>
-<text x="1250" y="303" font-size="10" fill="#1e293b">feat_ticker_unified</text>
-<text x="1250" y="318" font-size="10" fill="#1e293b">ml_ticker_label</text>
-<text x="1250" y="333" font-size="10" fill="#1e293b">ml_ticker_training</text>
-<text x="1250" y="348" font-size="10" fill="#1e293b">agg_feature_health_daily</text>
-<text x="1250" y="363" font-size="10" fill="#1e293b">feature_drift_alerts</text>
-<polyline points="760,320 798,320" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#a2563eb)"/>
-<text x="780.0" y="312" font-size="9" font-weight="600" fill="#2563eb" text-anchor="middle">DP2a</text>
-<polyline points="980,320 1018,320" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#a2563eb)"/>
-<text x="1000.0" y="312" font-size="9" font-weight="600" fill="#2563eb" text-anchor="middle">DP2b</text>
-<polyline points="1200,320 1238,320" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#a2563eb)"/>
-<text x="1220.0" y="312" font-size="9" font-weight="600" fill="#2563eb" text-anchor="middle">DP3</text>
-<polyline points="520,262 578,262" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#a2563eb)"/>
-<text x="549" y="256" font-size="9" font-weight="600" fill="#2563eb" text-anchor="middle">B4 DP1</text>
-<polyline points="520,355 578,355" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#a2563eb)"/>
-<text x="549" y="349" font-size="9" font-weight="600" fill="#2563eb" text-anchor="middle">B5 JDBC</text>
-<polyline points="690,250 690,226 1090,226 1090,248" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#a2563eb)"/>
-<text x="890" y="220" font-size="9" font-weight="600" fill="#2563eb" text-anchor="middle">raw_tickers → dim_ticker · raw_corporate_actions → fact_daily_price (adj_close)</text>
-<polyline points="1170,250 1170,226 1360,226 1360,160 1448,160" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#a2563eb)"/>
-<text x="1265" y="220" font-size="9" font-weight="600" fill="#2563eb" text-anchor="middle">B7–B8 mc mirror</text>
-<polyline points="980,400 1018,400" fill="none" stroke="#ea580c" stroke-width="2" marker-end="url(#aea580c)"/>
-<text x="999" y="392" font-size="9" font-weight="600" fill="#ea580c" text-anchor="middle">S3b</text>
-<rect x="580" y="555" width="180" height="120" rx="8" fill="#fff7ed" stroke="#ea580c" stroke-width="1.5"/>
-<text x="590" y="575" font-size="13" font-weight="700" fill="#0f172a">PyFlink silver_stream</text>
-<text x="590" y="593" font-size="10" fill="#1e293b">Flink :8081 · parallelism 4</text>
-<text x="590" y="608" font-size="10" fill="#1e293b">dedup on event_id (keyed state)</text>
-<text x="590" y="623" font-size="10" fill="#1e293b">watermark 60 s</text>
-<text x="590" y="638" font-size="10" fill="#1e293b">late events → quarantine</text>
-<text x="590" y="653" font-size="10" fill="#1e293b">checkpoint every 30 s</text>
-<rect x="800" y="555" width="180" height="120" rx="8" fill="#fff7ed" stroke="#ea580c" stroke-width="1.5"/>
-<text x="810" y="575" font-size="13" font-weight="700" fill="#0f172a">data/flink/current</text>
-<text x="810" y="593" font-size="10" fill="#1e293b">committed JSONL files</text>
-<text x="810" y="608" font-size="10" fill="#1e293b">stg_events</text>
-<text x="810" y="623" font-size="10" fill="#1e293b">stg_events_quarantine</text>
-<text x="810" y="638" font-size="10" fill="#64748b" font-style="italic">feat_stream_volume_5m</text>
-<text x="810" y="653" font-size="10" fill="#64748b" font-style="italic">(no consumer)</text>
-<polyline points="520,605 578,605" fill="none" stroke="#ea580c" stroke-width="2" marker-end="url(#aea580c)"/>
-<text x="549" y="598" font-size="9" font-weight="600" fill="#ea580c" text-anchor="middle">S4 earliest</text>
-<polyline points="760,605 798,605" fill="none" stroke="#ea580c" stroke-width="2" marker-end="url(#aea580c)"/>
-<text x="779" y="598" font-size="9" font-weight="600" fill="#ea580c" text-anchor="middle">S5</text>
-<polyline points="890,555 890,427" fill="none" stroke="#ea580c" stroke-width="2" marker-end="url(#aea580c)"/>
-<text x="898" y="500" font-size="9" font-weight="600" fill="#ea580c" text-anchor="start">S3a load_flink_stream (DP2a) · insert-only MERGE on event_id</text>
-<polyline points="410,570 410,490 620,490 620,427" fill="none" stroke="#ea580c" stroke-width="2" marker-end="url(#aea580c)"/>
-<text x="470" y="484" font-size="9" font-weight="600" fill="#ea580c" text-anchor="middle">S2 Spark stream</text>
-<rect x="1450" y="135" width="230" height="56" rx="8" fill="#f0fdf4" stroke="#16a34a" stroke-width="1.5"/>
-<text x="1460" y="155" font-size="13" font-weight="700" fill="#0f172a">minio-sync-gold</text>
-<text x="1460" y="173" font-size="10" fill="#64748b" font-style="italic">one-shot mc mirror of ./data/gold</text>
-<rect x="1450" y="225" width="230" height="66" rx="8" fill="#f0fdf4" stroke="#16a34a" stroke-width="1.5"/>
-<text x="1460" y="245" font-size="13" font-weight="700" fill="#0f172a">MinIO</text>
-<text x="1460" y="263" font-size="10" fill="#1e293b">delta-lake/gold · landing-vendor-offline</text>
-<text x="1460" y="278" font-size="10" fill="#1e293b">API :9000 · UI :9001</text>
-<rect x="1450" y="335" width="230" height="80" rx="8" fill="#f0fdf4" stroke="#16a34a" stroke-width="1.5"/>
-<text x="1460" y="355" font-size="13" font-weight="700" fill="#0f172a">Trino :8083</text>
-<text x="1460" y="373" font-size="10" fill="#1e293b">catalog delta → MinIO Gold (C1)</text>
-<text x="1460" y="388" font-size="10" fill="#1e293b">catalog postgres → vendor_db (C2)</text>
-<text x="1460" y="403" font-size="10" fill="#64748b" font-style="italic">tables registered by hand</text>
-<rect x="1450" y="455" width="108" height="56" rx="8" fill="#f8fafc" stroke="#6b7280" stroke-width="1.5" stroke-dasharray="6 4"/>
-<text x="1460" y="475" font-size="13" font-weight="700" fill="#0f172a">Hive</text>
-<text x="1460" y="493" font-size="10" fill="#1e293b">Metastore :9083</text>
-<rect x="1572" y="455" width="108" height="56" rx="8" fill="#f0fdf4" stroke="#16a34a" stroke-width="1.5"/>
-<text x="1582" y="475" font-size="13" font-weight="700" fill="#0f172a">SQL client</text>
-<text x="1582" y="493" font-size="10" fill="#1e293b">DBeaver</text>
-<polyline points="1565,191 1565,223" fill="none" stroke="#16a34a" stroke-width="2" marker-end="url(#a16a34a)"/>
-<polyline points="1565,291 1565,333" fill="none" stroke="#16a34a" stroke-width="2" marker-end="url(#a16a34a)"/>
-<text x="1573" y="316" font-size="9" font-weight="600" fill="#16a34a" text-anchor="start">C1</text>
-<polyline points="1504,455 1504,417" fill="none" stroke="#6b7280" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#a6b7280)"/>
-<text x="1496" y="440" font-size="9" font-weight="600" fill="#6b7280" text-anchor="end">M1</text>
-<polyline points="1626,417 1626,453" fill="none" stroke="#16a34a" stroke-width="2" marker-end="url(#a16a34a)"/>
-<polyline points="1626,453 1626,417" fill="none" stroke="#16a34a" stroke-width="2" marker-end="url(#a16a34a)"/>
-<text x="1634" y="440" font-size="9" font-weight="600" fill="#16a34a" text-anchor="start">C3</text>
-<text x="1450" y="530" font-size="9" fill="#64748b">C4: SQL client also queries</text>
-<text x="1450" y="543" font-size="9" fill="#64748b">PostgreSQL directly (EXPLAIN).</text>
-<rect x="30" y="770" width="1650" height="74" rx="8" fill="#f8fafc" stroke="#6b7280" stroke-width="1.5" stroke-dasharray="6 4"/>
-<text x="40" y="790" font-size="13" font-weight="700" fill="#0f172a">Governance (manual, cross-cutting)</text>
-<text x="40" y="808" font-size="10" fill="#1e293b">M2 contracts/*.json: enforced on OHLCV v1/v2 before the Bronze write, and on dim_ticker, fact_daily_price, feat_ticker_daily in DAG validators. Stream contracts exist but no job loads them.</text>
-<text x="40" y="823" font-size="10" fill="#1e293b">M7–M8 datahub/lineage.yml → DataHub CLI → DataHub GMS :8084 / UI :9002 (static dataset lineage; DataHub runs outside the default Compose stack).</text>
-<polyline points="30,880 70,880" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#a2563eb)"/>
-<text x="80" y="884" font-size="11" fill="#334155">B: batch / file / JDBC / Delta</text>
-<polyline points="330,880 370,880" fill="none" stroke="#ea580c" stroke-width="2" marker-end="url(#aea580c)"/>
-<text x="380" y="884" font-size="11" fill="#334155">S: streaming events</text>
-<polyline points="630,880 670,880" fill="none" stroke="#16a34a" stroke-width="2" marker-end="url(#a16a34a)"/>
-<text x="680" y="884" font-size="11" fill="#334155">C: query / serving</text>
-<polyline points="930,880 970,880" fill="none" stroke="#6b7280" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#a6b7280)"/>
-<text x="980" y="884" font-size="11" fill="#334155">M: control / metadata (no payload)</text>
-<text x="30" y="914" font-size="10" fill="#64748b">Edge IDs match the Data flow catalog in docs/architecture.md. Italic grey text marks outputs without a downstream consumer or steps done by hand.</text></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 572" width="1000" height="572" role="img" aria-labelledby="vnstock-dataflow-title vnstock-dataflow-desc">
+<title id="vnstock-dataflow-title">VNStock data flow</title>
+<desc id="vnstock-dataflow-desc">A generator and PostgreSQL feed landing files and Kafka; Spark and PyFlink process them into a Delta lakehouse (Bronze, Silver, Gold, Features) whose Gold layer is mirrored to MinIO and queried through Trino, all orchestrated by Airflow.</desc>
+<defs><marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker><marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#bf4520"/></marker><marker id="arrow-sm" markerWidth="6" markerHeight="5" refX="5" refY="2.5" orient="auto"><polygon points="0 0, 6 2.5, 0 5" fill="#4f5d75"/></marker></defs>
+<rect width="100%" height="100%" fill="#f5f5f5"/>
+<polygon points="0,4 180,4 192,18 180,32 0,32" fill="#2d3142"/>
+<text x="96.0" y="21" fill="#f5f5f5" font-size="7" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" letter-spacing="0.14em" text-anchor="middle">DATA SOURCES</text>
+<polygon points="192,4 372,4 384,18 372,32 192,32 204,18" fill="#3d4460"/>
+<text x="288.0" y="21" fill="#f5f5f5" font-size="7" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" letter-spacing="0.14em" text-anchor="middle">INGESTION</text>
+<polygon points="384,4 564,4 576,18 564,32 384,32 396,18" fill="#2d3142"/>
+<text x="480.0" y="21" fill="#f5f5f5" font-size="7" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" letter-spacing="0.14em" text-anchor="middle">PROCESSING</text>
+<polygon points="576,4 756,4 768,18 756,32 576,32 588,18" fill="#3d4460"/>
+<text x="672.0" y="21" fill="#f5f5f5" font-size="7" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" letter-spacing="0.14em" text-anchor="middle">LAKEHOUSE</text>
+<polygon points="768,4 964,4 964,32 768,32 780,18" fill="#2d3142"/>
+<text x="866.0" y="21" fill="#f5f5f5" font-size="7" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" letter-spacing="0.14em" text-anchor="middle">SERVING</text>
+<polygon points="972,40 1000,40 1000,236 986,248 972,236" fill="#2d3142"/>
+<polygon points="972,248 986,260 1000,248 1000,460 972,460" fill="#3d4460"/>
+<text x="986" y="144" fill="#f5f5f5" font-size="7" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" letter-spacing="0.14em" text-anchor="middle" transform="rotate(-90 986 144)" dominant-baseline="middle">ORCHESTRATION</text>
+<text x="986" y="358" fill="#f5f5f5" font-size="7" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" letter-spacing="0.14em" text-anchor="middle" transform="rotate(-90 986 358)" dominant-baseline="middle">GOVERNANCE</text>
+<rect x="4" y="40" width="184" height="368" rx="6" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.2)" stroke-width="0.8" stroke-dasharray="6,3"/>
+<text x="96" y="52" fill="#4f5d75" font-size="7" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" letter-spacing="0.14em" text-anchor="middle">SOURCES</text>
+<rect x="196" y="40" width="768" height="368" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.18)" stroke-width="1.2"/>
+<rect x="4" y="420" width="960" height="40" rx="6" fill="rgba(45,49,66,0.05)" stroke="rgba(45,49,66,0.2)" stroke-width="0.8"/>
+<path d="M 144,240 H 212" fill="none" stroke="#4f5d75" stroke-width="1" marker-end="url(#arrow)"/>
+<path d="M 144,272 H 152 Q 160,272 160,280 V 344 Q 160,352 168,352 H 212" fill="none" stroke="#4f5d75" stroke-width="1" marker-end="url(#arrow)"/>
+<path d="M 144,160 H 404" fill="none" stroke="#4f5d75" stroke-width="1" marker-end="url(#arrow)"/>
+<path d="M 364,256 H 380 Q 388,256 388,248 V 192 Q 388,184 396,184 H 404" fill="none" stroke="#4f5d75" stroke-width="1" marker-end="url(#arrow)"/>
+<path d="M 364,352 H 404" fill="none" stroke="#4f5d75" stroke-width="1" marker-end="url(#arrow)"/>
+<path d="M 480,312 V 200" fill="none" stroke="#4f5d75" stroke-width="1" marker-end="url(#arrow)"/>
+<path d="M 556,160 H 596" fill="none" stroke="#bf4520" stroke-width="1.2" marker-end="url(#arrow-accent)"/>
+<path d="M 748,160 H 790" fill="none" stroke="#bf4520" stroke-width="1.2" marker-end="url(#arrow-accent)"/>
+<path d="M 866,200 V 312" fill="none" stroke="#4f5d75" stroke-width="1" marker-end="url(#arrow)"/>
+<line x1="480" y1="96" x2="480" y2="120" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow-sm)"/>
+<rect x="156.0" y="220" width="44" height="12" rx="2" fill="#f5f5f5"/>
+<text x="178" y="229" fill="#5a6580" font-size="8" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" letter-spacing="0.06em" text-anchor="middle">PARQUET</text>
+<rect x="168.0" y="306" width="40" height="12" rx="2" fill="#f5f5f5"/>
+<text x="188" y="315" fill="#5a6580" font-size="8" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" letter-spacing="0.06em" text-anchor="middle">EVENTS</text>
+<rect x="274.0" y="140" width="28" height="12" rx="2" fill="#f5f5f5"/>
+<text x="288" y="149" fill="#5a6580" font-size="8" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" letter-spacing="0.06em" text-anchor="middle">JDBC</text>
+<rect x="394.0" y="214" width="40" height="12" rx="2" fill="#f5f5f5"/>
+<text x="414" y="223" fill="#5a6580" font-size="8" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" letter-spacing="0.06em" text-anchor="middle">INGEST</text>
+<rect x="486.0" y="250" width="64" height="12" rx="2" fill="#f5f5f5"/>
+<text x="518" y="259" fill="#5a6580" font-size="8" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" letter-spacing="0.06em" text-anchor="middle">JSONL FILES</text>
+<rect x="366.0" y="332" width="36" height="12" rx="2" fill="#f5f5f5"/>
+<text x="384" y="341" fill="#5a6580" font-size="8" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" letter-spacing="0.06em" text-anchor="middle">TOPIC</text>
+<rect x="558.0" y="140" width="36" height="12" rx="2" fill="#f5f5f5"/>
+<text x="576" y="149" fill="#bf4520" font-size="8" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" letter-spacing="0.06em" text-anchor="middle">WRITE</text>
+<rect x="749.0" y="140" width="40" height="12" rx="2" fill="#f5f5f5"/>
+<text x="769" y="149" fill="#bf4520" font-size="8" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" letter-spacing="0.06em" text-anchor="middle">MIRROR</text>
+<rect x="872.0" y="250" width="64" height="12" rx="2" fill="#f5f5f5"/>
+<text x="904" y="259" fill="#5a6580" font-size="8" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" letter-spacing="0.06em" text-anchor="middle">DELTA FILES</text>
+<rect x="208" y="52" width="744" height="44" rx="4" fill="rgba(45,49,66,0.05)" stroke="rgba(45,49,66,0.18)" stroke-width="0.8"/>
+<svg aria-hidden="true" x="902" y="62" width="24" height="24" viewBox="0 0 24 24" fill="#4f5d75"><path d="M17.195 16.822l4.002-4.102C23.55 10.308 23.934 5.154 24 .43a.396.396 0 0 0-.246-.373.392.392 0 0 0-.437.09l-6.495 6.658-4.102-4.003C10.309.45 5.154.066.43 0H.423a.397.397 0 0 0-.277.683l6.658 6.494-4.003 4.103C.45 13.692.065 18.846 0 23.57a.398.398 0 0 0 .683.282l6.494-6.657 3.934 3.837.17.165c2.41 2.353 7.565 2.737 12.288 2.803h.006a.397.397 0 0 0 .277-.683l-6.657-6.495zm-.409-9.476c.04.115.05.24.031.344-.17.96-1.593 2.538-4.304 3.87a.597.597 0 0 0-.08-.079c1.432-3.155 1.828-5.61 1.175-7.322l3.058 2.984.12.203zm-.131 9.44a.73.73 0 0 1-.347.031c-.96-.171-2.537-1.594-3.87-4.307a.656.656 0 0 0 .08-.078l-.001.001c3.155 1.432 5.61 1.83 7.324 1.174l-2.969 3.043M23.568.392a.05.05 0 0 1 .052-.011c.018.006.03.024.029.043-.065 4.655-.437 9.726-2.703 12.05-1.53 1.565-4.326 1.419-8.283-.377.006-.037.021-.07.02-.108 0-.044-.017-.082-.026-.123 2.83-1.39 4.315-3.037 4.506-4.115.057-.322-.009-.542-.102-.688l6.507-6.67V.392zM.393.43A.045.045 0 0 1 .382.38C.39.36.403.343.425.35c4.655.065 9.727.438 12.05 2.703l.002.002c1.56 1.527 1.415 4.323-.379 8.28-.033-.005-.062-.02-.097-.02h-.008c-.045.001-.084.019-.126.027-1.39-2.83-3.037-4.314-4.115-4.506-.323-.057-.542.01-.688.103L.393.43zm11.94 11.563a.331.331 0 0 1-.327.335H12a.332.332 0 0 1-.004-.661c.172.016.333.144.335.326h.002zm-5.12 4.661a.722.722 0 0 1-.03-.345c.17-.96 1.595-2.54 4.309-3.873.013.016.019.035.033.05.013.012.03.017.044.028-1.434 3.158-1.83 5.613-1.177 7.326l-3.041-2.967m-.006-9.659a.735.735 0 0 1 .345-.031c.961.17 2.54 1.594 3.871 4.306a.597.597 0 0 0-.079.08c-2.167-.983-4.007-1.484-5.498-1.484-.68 0-1.289.103-1.825.308L7.128 7.35M.43 23.607c-.018.018-.038.015-.052.01-.019-.007-.028-.021-.028-.043.065-4.654.437-9.725 2.703-12.049 1.527-1.565 4.325-1.419 8.286.378-.006.035-.02.067-.02.104 0 .043.018.083.026.124-2.831 1.391-4.317 3.04-4.51 4.117-.057.322.01.542.103.688L.43 23.607zm23.144.042c-4.655-.065-9.726-.437-12.05-2.703l-.005-.006c-1.56-1.526-1.412-4.322.383-8.279.033.005.064.02.098.02h.009c.043 0 .08-.018.122-.027 1.39 2.832 3.036 4.317 4.115 4.51.083.014.16.021.23.021a.776.776 0 0 0 .45-.133l6.68 6.516c.02.02.016.04.01.052a.042.042 0 0 1-.042.029z"/></svg>
+<text x="580" y="71" fill="#2d3142" font-size="10" font-family="'Geist', system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-weight="600" text-anchor="middle">Orchestration · Apache Airflow 2.9</text>
+<text x="580" y="84" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle">DP1 bronze → DP2 silver → DP2 gold → DP3 features, chained by Datasets</text>
+<rect x="8" y="128" width="136" height="64" rx="6" fill="#f5f5f5"/>
+<rect x="8" y="128" width="136" height="64" rx="6" fill="#ffffff" stroke="rgba(45,49,66,0.25)" stroke-width="1"/>
+<rect x="16" y="134" width="20" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.28)" stroke-width="0.8"/>
+<text x="26.0" y="143" fill="rgba(45,49,66,0.55)" font-size="7" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" letter-spacing="0.08em" text-anchor="middle">DB</text>
+<svg aria-hidden="true" x="112" y="134" width="24" height="24" viewBox="0 0 24 24" fill="#2d3142"><path d="M23.5594 14.7228a.5269.5269 0 0 0-.0563-.1191c-.139-.2632-.4768-.3418-1.0074-.2321-1.6533.3411-2.2935.1312-2.5256-.0191 1.342-2.0482 2.445-4.522 3.0411-6.8297.2714-1.0507.7982-3.5237.1222-4.7316a1.5641 1.5641 0 0 0-.1509-.235C21.6931.9086 19.8007.0248 17.5099.0005c-1.4947-.0158-2.7705.3461-3.1161.4794a9.449 9.449 0 0 0-.5159-.0816 8.044 8.044 0 0 0-1.3114-.1278c-1.1822-.0184-2.2038.2642-3.0498.8406-.8573-.3211-4.7888-1.645-7.2219.0788C.9359 2.1526.3086 3.8733.4302 6.3043c.0409.818.5069 3.334 1.2423 5.7436.4598 1.5065.9387 2.7019 1.4334 3.582.553.9942 1.1259 1.5933 1.7143 1.7895.4474.1491 1.1327.1441 1.8581-.7279.8012-.9635 1.5903-1.8258 1.9446-2.2069.4351.2355.9064.3625 1.39.3772a.0569.0569 0 0 0 .0004.0041 11.0312 11.0312 0 0 0-.2472.3054c-.3389.4302-.4094.5197-1.5002.7443-.3102.064-1.1344.2339-1.1464.8115-.0025.1224.0329.2309.0919.3268.2269.4231.9216.6097 1.015.6331 1.3345.3335 2.5044.092 3.3714-.6787-.017 2.231.0775 4.4174.3454 5.0874.2212.5529.7618 1.9045 2.4692 1.9043.2505 0 .5263-.0291.8296-.0941 1.7819-.3821 2.5557-1.1696 2.855-2.9059.1503-.8707.4016-2.8753.5388-4.1012.0169-.0703.0357-.1207.057-.1362.0007-.0005.0697-.0471.4272.0307a.3673.3673 0 0 0 .0443.0068l.2539.0223.0149.001c.8468.0384 1.9114-.1426 2.5312-.4308.6438-.2988 1.8057-1.0323 1.5951-1.6698zM2.371 11.8765c-.7435-2.4358-1.1779-4.8851-1.2123-5.5719-.1086-2.1714.4171-3.6829 1.5623-4.4927 1.8367-1.2986 4.8398-.5408 6.108-.13-.0032.0032-.0066.0061-.0098.0094-2.0238 2.044-1.9758 5.536-1.9708 5.7495-.0002.0823.0066.1989.0162.3593.0348.5873.0996 1.6804-.0735 2.9184-.1609 1.1504.1937 2.2764.9728 3.0892.0806.0841.1648.1631.2518.2374-.3468.3714-1.1004 1.1926-1.9025 2.1576-.5677.6825-.9597.5517-1.0886.5087-.3919-.1307-.813-.5871-1.2381-1.3223-.4796-.839-.9635-2.0317-1.4155-3.5126zm6.0072 5.0871c-.1711-.0428-.3271-.1132-.4322-.1772.0889-.0394.2374-.0902.4833-.1409 1.2833-.2641 1.4815-.4506 1.9143-1.0002.0992-.126.2116-.2687.3673-.4426a.3549.3549 0 0 0 .0737-.1298c.1708-.1513.2724-.1099.4369-.0417.156.0646.3078.26.3695.4752.0291.1016.0619.2945-.0452.4444-.9043 1.2658-2.2216 1.2494-3.1676 1.0128zm2.094-3.988-.0525.141c-.133.3566-.2567.6881-.3334 1.003-.6674-.0021-1.3168-.2872-1.8105-.8024-.6279-.6551-.9131-1.5664-.7825-2.5004.1828-1.3079.1153-2.4468.079-3.0586-.005-.0857-.0095-.1607-.0122-.2199.2957-.2621 1.6659-.9962 2.6429-.7724.4459.1022.7176.4057.8305.928.5846 2.7038.0774 3.8307-.3302 4.7363-.084.1866-.1633.3629-.2311.5454zm7.3637 4.5725c-.0169.1768-.0358.376-.0618.5959l-.146.4383a.3547.3547 0 0 0-.0182.1077c-.0059.4747-.054.6489-.115.8693-.0634.2292-.1353.4891-.1794 1.0575-.11 1.4143-.8782 2.2267-2.4172 2.5565-1.5155.3251-1.7843-.4968-2.0212-1.2217a6.5824 6.5824 0 0 0-.0769-.2266c-.2154-.5858-.1911-1.4119-.1574-2.5551.0165-.5612-.0249-1.9013-.3302-2.6462.0044-.2932.0106-.5909.019-.8918a.3529.3529 0 0 0-.0153-.1126 1.4927 1.4927 0 0 0-.0439-.208c-.1226-.4283-.4213-.7866-.7797-.9351-.1424-.059-.4038-.1672-.7178-.0869.067-.276.1831-.5875.309-.9249l.0529-.142c.0595-.16.134-.3257.213-.5012.4265-.9476 1.0106-2.2453.3766-5.1772-.2374-1.0981-1.0304-1.6343-2.2324-1.5098-.7207.0746-1.3799.3654-1.7088.5321a5.6716 5.6716 0 0 0-.1958.1041c.0918-1.1064.4386-3.1741 1.7357-4.4823a4.0306 4.0306 0 0 1 .3033-.276.3532.3532 0 0 0 .1447-.0644c.7524-.5706 1.6945-.8506 2.802-.8325.4091.0067.8017.0339 1.1742.081 1.939.3544 3.2439 1.4468 4.0359 2.3827.8143.9623 1.2552 1.9315 1.4312 2.4543-1.3232-.1346-2.2234.1268-2.6797.779-.9926 1.4189.543 4.1729 1.2811 5.4964.1353.2426.2522.4522.2889.5413.2403.5825.5515.9713.7787 1.2552.0696.087.1372.1714.1885.245-.4008.1155-1.1208.3825-1.0552 1.717-.0123.1563-.0423.4469-.0834.8148-.0461.2077-.0702.4603-.0994.7662zm.8905-1.6211c-.0405-.8316.2691-.9185.5967-1.0105a2.8566 2.8566 0 0 0 .135-.0406 1.202 1.202 0 0 0 .1342.103c.5703.3765 1.5823.4213 3.0068.1344-.2016.1769-.5189.3994-.9533.6011-.4098.1903-1.0957.333-1.7473.3636-.7197.0336-1.0859-.0807-1.1721-.151zm.5695-9.2712c-.0059.3508-.0542.6692-.1054 1.0017-.055.3576-.112.7274-.1264 1.1762-.0142.4368.0404.8909.0932 1.3301.1066.887.216 1.8003-.2075 2.7014a3.5272 3.5272 0 0 1-.1876-.3856c-.0527-.1276-.1669-.3326-.3251-.6162-.6156-1.1041-2.0574-3.6896-1.3193-4.7446.3795-.5427 1.3408-.5661 2.1781-.463zm.2284 7.0137a12.3762 12.3762 0 0 0-.0853-.1074l-.0355-.0444c.7262-1.1995.5842-2.3862.4578-3.4385-.0519-.4318-.1009-.8396-.0885-1.2226.0129-.4061.0666-.7543.1185-1.0911.0639-.415.1288-.8443.1109-1.3505.0134-.0531.0188-.1158.0118-.1902-.0457-.4855-.5999-1.938-1.7294-3.253-.6076-.7073-1.4896-1.4972-2.6889-2.0395.5251-.1066 1.2328-.2035 2.0244-.1859 2.0515.0456 3.6746.8135 4.8242 2.2824a.908.908 0 0 1 .0667.1002c.7231 1.3556-.2762 6.2751-2.9867 10.5405zm-8.8166-6.1162c-.025.1794-.3089.4225-.6211.4225a.5821.5821 0 0 1-.0809-.0056c-.1873-.026-.3765-.144-.5059-.3156-.0458-.0605-.1203-.178-.1055-.2844.0055-.0401.0261-.0985.0925-.1488.1182-.0894.3518-.1226.6096-.0867.3163.0441.6426.1938.6113.4186zm7.9305-.4114c.0111.0792-.049.201-.1531.3102-.0683.0717-.212.1961-.4079.2232a.5456.5456 0 0 1-.075.0052c-.2935 0-.5414-.2344-.5607-.3717-.024-.1765.2641-.3106.5611-.352.297-.0414.6111.0088.6356.1851z"/></svg>
+<text x="76.0" y="176" fill="#2d3142" font-size="11" font-family="'Geist', system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-weight="600" text-anchor="middle">PostgreSQL</text>
+<text x="76.0" y="190" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle">vendor_db · :5432</text>
+<rect x="8" y="224" width="136" height="64" rx="6" fill="#f5f5f5"/>
+<rect x="8" y="224" width="136" height="64" rx="6" fill="#ffffff" stroke="rgba(45,49,66,0.25)" stroke-width="1"/>
+<rect x="16" y="230" width="24" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.28)" stroke-width="0.8"/>
+<text x="28.0" y="239" fill="rgba(45,49,66,0.55)" font-size="7" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" letter-spacing="0.08em" text-anchor="middle">GEN</text>
+<svg aria-hidden="true" x="112" y="230" width="24" height="24" viewBox="0 0 24 24" fill="#2d3142"><path d="M14.25.18l.9.2.73.26.59.3.45.32.34.34.25.34.16.33.1.3.04.26.02.2-.01.13V8.5l-.05.63-.13.55-.21.46-.26.38-.3.31-.33.25-.35.19-.35.14-.33.1-.3.07-.26.04-.21.02H8.77l-.69.05-.59.14-.5.22-.41.27-.33.32-.27.35-.2.36-.15.37-.1.35-.07.32-.04.27-.02.21v3.06H3.17l-.21-.03-.28-.07-.32-.12-.35-.18-.36-.26-.36-.36-.35-.46-.32-.59-.28-.73-.21-.88-.14-1.05-.05-1.23.06-1.22.16-1.04.24-.87.32-.71.36-.57.4-.44.42-.33.42-.24.4-.16.36-.1.32-.05.24-.01h.16l.06.01h8.16v-.83H6.18l-.01-2.75-.02-.37.05-.34.11-.31.17-.28.25-.26.31-.23.38-.2.44-.18.51-.15.58-.12.64-.1.71-.06.77-.04.84-.02 1.27.05zm-6.3 1.98l-.23.33-.08.41.08.41.23.34.33.22.41.09.41-.09.33-.22.23-.34.08-.41-.08-.41-.23-.33-.33-.22-.41-.09-.41.09zm13.09 3.95l.28.06.32.12.35.18.36.27.36.35.35.47.32.59.28.73.21.88.14 1.04.05 1.23-.06 1.23-.16 1.04-.24.86-.32.71-.36.57-.4.45-.42.33-.42.24-.4.16-.36.09-.32.05-.24.02-.16-.01h-8.22v.82h5.84l.01 2.76.02.36-.05.34-.11.31-.17.29-.25.25-.31.24-.38.2-.44.17-.51.15-.58.13-.64.09-.71.07-.77.04-.84.01-1.27-.04-1.07-.14-.9-.2-.73-.25-.59-.3-.45-.33-.34-.34-.25-.34-.16-.33-.1-.3-.04-.25-.02-.2.01-.13v-5.34l.05-.64.13-.54.21-.46.26-.38.3-.32.33-.24.35-.2.35-.14.33-.1.3-.06.26-.04.21-.02.13-.01h5.84l.69-.05.59-.14.5-.21.41-.28.33-.32.27-.35.2-.36.15-.36.1-.35.07-.32.04-.28.02-.21V6.07h2.09l.14.01zm-6.47 14.25l-.23.33-.08.41.08.41.23.33.33.23.41.08.41-.08.33-.23.23-.33.08-.41-.08-.41-.23-.33-.33-.23-.41-.08-.41.08z"/></svg>
+<text x="76.0" y="272" fill="#2d3142" font-size="11" font-family="'Geist', system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-weight="600" text-anchor="middle">Data generator</text>
+<text x="76.0" y="286" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle">Python · seed 42</text>
+<rect x="212" y="216" width="152" height="80" rx="6" fill="#f5f5f5"/>
+<rect x="212" y="216" width="152" height="80" rx="6" fill="#ffffff" stroke="rgba(45,49,66,0.25)" stroke-width="1"/>
+<rect x="220" y="222" width="30" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.28)" stroke-width="0.8"/>
+<text x="235.0" y="231" fill="rgba(45,49,66,0.55)" font-size="7" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" letter-spacing="0.08em" text-anchor="middle">FILE</text>
+<svg aria-hidden="true" x="332" y="222" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#2d3142" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v4a1 1 0 0 0 1 1h4" /> <path d="M17 21h-10a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2" /></svg>
+<text x="288.0" y="264" fill="#2d3142" font-size="11" font-family="'Geist', system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-weight="600" text-anchor="middle">Landing drops</text>
+<text x="288.0" y="278" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle">data/landing · Parquet</text>
+<rect x="212" y="312" width="152" height="80" rx="6" fill="#f5f5f5"/>
+<rect x="212" y="312" width="152" height="80" rx="6" fill="#ffffff" stroke="rgba(45,49,66,0.25)" stroke-width="1"/>
+<rect x="220" y="318" width="34" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.28)" stroke-width="0.8"/>
+<text x="237.0" y="327" fill="rgba(45,49,66,0.55)" font-size="7" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" letter-spacing="0.08em" text-anchor="middle">QUEUE</text>
+<svg aria-hidden="true" x="332" y="318" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#2d3142" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4l-8 4l8 4l8 -4l-8 -4" /> <path d="M4 12l8 4l8 -4" /> <path d="M4 16l8 4l8 -4" /></svg>
+<text x="288.0" y="360" fill="#2d3142" font-size="11" font-family="'Geist', system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-weight="600" text-anchor="middle">Kafka</text>
+<text x="288.0" y="374" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle">stock_market_events_v3</text>
+<rect x="404" y="120" width="152" height="80" rx="6" fill="#f5f5f5"/>
+<rect x="404" y="120" width="152" height="80" rx="6" fill="#ffffff" stroke="rgba(45,49,66,0.25)" stroke-width="1"/>
+<rect x="412" y="126" width="34" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.28)" stroke-width="0.8"/>
+<text x="429.0" y="135" fill="rgba(45,49,66,0.55)" font-size="7" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" letter-spacing="0.08em" text-anchor="middle">BATCH</text>
+<svg aria-hidden="true" x="524" y="126" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#2d3142" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 18a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" /> <path d="M5 6a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" /> <path d="M15 12a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" /> <path d="M7 8l0 8" /> <path d="M7 8a4 4 0 0 0 4 4h4" /></svg>
+<text x="480.0" y="168" fill="#2d3142" font-size="11" font-family="'Geist', system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-weight="600" text-anchor="middle">Spark 3.5</text>
+<text x="480.0" y="182" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle">batch + stream · :7077</text>
+<rect x="404" y="312" width="152" height="80" rx="6" fill="#f5f5f5"/>
+<rect x="404" y="312" width="152" height="80" rx="6" fill="#ffffff" stroke="rgba(45,49,66,0.25)" stroke-width="1"/>
+<rect x="412" y="318" width="40" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.28)" stroke-width="0.8"/>
+<text x="432.0" y="327" fill="rgba(45,49,66,0.55)" font-size="7" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" letter-spacing="0.08em" text-anchor="middle">STREAM</text>
+<svg aria-hidden="true" x="524" y="318" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#2d3142" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8.1 8.1 0 0 0 -15.5 -2m-.5 -4v4h4" /> <path d="M4 13a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4" /></svg>
+<text x="480.0" y="360" fill="#2d3142" font-size="11" font-family="'Geist', system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-weight="600" text-anchor="middle">PyFlink</text>
+<text x="480.0" y="374" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle">dedup · watermark · :8081</text>
+<rect x="790" y="120" width="152" height="80" rx="6" fill="#f5f5f5"/>
+<rect x="790" y="120" width="152" height="80" rx="6" fill="#ffffff" stroke="rgba(45,49,66,0.25)" stroke-width="1"/>
+<rect x="798" y="126" width="20" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.28)" stroke-width="0.8"/>
+<text x="808.0" y="135" fill="rgba(45,49,66,0.55)" font-size="7" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" letter-spacing="0.08em" text-anchor="middle">S3</text>
+<svg aria-hidden="true" x="910" y="126" width="24" height="24" viewBox="0 0 24 24" fill="#2d3142"><path d="M13.2072.006c-.6216-.0478-1.2.1943-1.6211.582a2.15 2.15 0 0 0-.0938 3.0352l3.4082 3.5507a3.042 3.042 0 0 1-.664 4.6875l-.463.2383V7.2853a15.4198 15.4198 0 0 0-8.0174 10.4862v.0176l6.5487-3.3281v7.621L13.7794 24V13.6817l.8965-.4629a4.4432 4.4432 0 0 0 1.2207-7.0292l-3.371-3.5254a.7489.7489 0 0 1 .037-1.0547.7522.7522 0 0 1 1.0567.0371l.4668.4863-.006.0059 4.0704 4.2441a.0566.0566 0 0 0 .082 0 .06.06 0 0 0 0-.0703l-3.1406-5.1425-.1484.1425.1484-.1445C14.4945.3926 13.8287.0538 13.2072.006Zm-.9024 9.8652v2.9941l-4.1523 2.1484a13.9787 13.9787 0 0 1 2.7676-3.9277 14.1784 14.1784 0 0 1 1.3847-1.2148z"/></svg>
+<text x="866.0" y="168" fill="#2d3142" font-size="11" font-family="'Geist', system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-weight="600" text-anchor="middle">MinIO</text>
+<text x="866.0" y="182" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle">delta-lake/gold · :9000</text>
+<rect x="790" y="312" width="152" height="80" rx="6" fill="#f5f5f5"/>
+<rect x="790" y="312" width="152" height="80" rx="6" fill="#ffffff" stroke="rgba(45,49,66,0.25)" stroke-width="1"/>
+<rect x="798" y="318" width="24" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.28)" stroke-width="0.8"/>
+<text x="810.0" y="327" fill="rgba(45,49,66,0.55)" font-size="7" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" letter-spacing="0.08em" text-anchor="middle">SQL</text>
+<svg aria-hidden="true" x="910" y="318" width="24" height="24" viewBox="0 0 24 24" fill="#2d3142"><path d="M14.124 16.8529a.1615.1615 0 1 1 .1576.1614.1577.1577 0 0 1-.1576-.1614zm-5.607-.1576a.1614.1614 0 1 0 0 .3228.1614.1614 0 0 0 0-.3228zm10.1341-.6648v1.9869c-.031.5788-.524 1.0237-1.1029.9954h-.3843a5.0596 5.0596 0 0 1-1.1298 1.7178.3192.3192 0 0 0 0 .465l.2382.2191a.3036.3036 0 0 1 .0385.4304c-1.126 1.3835-2.9669 2.1521-5.0498 2.1521a6.575 6.575 0 0 1-4.8192-1.8985c-.0029-.0032-.0059-.0063-.0087-.0096a.6302.6302 0 0 1 .0548-.8896c.137-.1265.1371-.3462 0-.4727a4.944 4.944 0 0 1-1.126-1.714h-.3497c-.5797.0284-1.0737-.416-1.1068-.9954v-1.9869c.0351-.5779.5286-1.02 1.1068-.9915h.2728a5.7648 5.7648 0 0 1 2.0791-3.0936c-.4227-1.0991-1.1529-3.2551-1.226-5.0075C6.0229 4.4705 6.2189.078 7.8253.001c1.6064-.0768 1.3719 4.0275 1.0991 6.6946a32.732 32.732 0 0 0-.123 4.4503 6.994 6.994 0 0 1 2.4826-.4304 7.2414 7.2414 0 0 1 1.7371.2075c.2614-1.2682.8762-3.574 2.0292-5.1958 1.6717-2.352 3.4357-4.7808 4.6116-4.1006 1.176.6802-.3074 3.1398-1.3297 4.4272-1.0222 1.2874-2.7862 3.2089-3.3742 4.2274-.2114.3843-.4304.8032-.5956 1.1529a5.7375 5.7375 0 0 1 2.9169 3.6125h.073v-2.3058a.3075.3075 0 0 0-.1806-.2844.9148.9148 0 0 1-.5573-.8148 1.0184 1.0184 0 0 1 .9045-.9044c.5593-.0598 1.061.3452 1.1208.9044a.9187.9187 0 0 1-.5534.8148.3074.3074 0 0 0-.1691.2844v2.1522a.3113.3113 0 0 0 .1691.2805.9724.9724 0 0 1 .5648.857zm-1.0222-3.9737a.4345.4345 0 0 0 .4612-.4151.4151.4151 0 1 0-.4612.4151zm-.4227 3.4779c.0978.4794.148.9672.1498 1.4565v.3651h.4113a.3228.3228 0 0 0 .3228-.319v-1.0069c-.0111-.2967-.2733-.5256-.5688-.4957h-.3151zm-3.7278-4.481.611.2383a36.6046 36.6046 0 0 1 2.3828-3.8661c1.2874-1.7255 2.3365-3.5817 1.8715-3.8699-.465-.2883-1.6179 1.2297-2.7708 3.109a34.8978 34.8978 0 0 0-2.0945 4.3887zm-4.0544.6726.0154 1.3335c-.0039.2007.1881.3587.3843.3152a6.4317 6.4317 0 0 1 1.4565-.1653 5.995 5.995 0 0 1 1.4527.1729c.1956.0398.3853-.1153.3843-.3151v-1.3412a.319.319 0 0 0-.2421-.3113 6.664 6.664 0 0 0-1.6026-.1845 6.7093 6.7093 0 0 0-1.6025.1845.3188.3188 0 0 0-.246.3113zm1.7063 6.8637v.3843a.6878.6878 0 0 1-.4996.269c-.3074 0-.538-.4189-.538-.4189a.073.073 0 0 0-.1-.0307l-.0024.0013a.0693.0693 0 0 0-.0245.0947c.0115.0231.2806.4957.6649.4957a.7144.7144 0 0 0 .3843-.1268.3267.3267 0 0 1 .3612 0 .8332.8332 0 0 0 .4727.1345.957.957 0 0 0 .6572-.4803.0692.0692 0 0 0-.0269-.0961.0692.0692 0 0 0-.0999.0269c0 .0231-.2191.3843-.5419.4074a.8036.8036 0 0 1-.5765-.269v-.3843a.3154.3154 0 0 1 .1268-.2537c.196-.1499.415-.3958.415-.4919a.538.538 0 0 0-.5764-.4189c-.3766 0-.6533.2498-.6533.4573 0 .1345.2536.3382.4227.4612a.3226.3226 0 0 1 .1346.2383zM7.783 11.6455l.5765-.3074c-.0192-1.126-.0346-3.1436 0-4.5425.0538-2.0368.1537-4.5732-.5226-4.5463S6.6877 4.2285 6.949 7.007a33.0562 33.0562 0 0 0 .834 4.6385zm-3.305 5.3919a.319.319 0 0 0 .319.319h.3997a3.046 3.046 0 0 1 0-.3651 7.546 7.546 0 0 1 .1461-1.4565c-.0493.0002-.34.0005-.3866-.0021a.4881.4881 0 0 0-.4781.4979v1.0068zm.9184 1.4718a5.3254 5.3254 0 0 1-.123-.5573.3228.3228 0 0 0-.319-.2728h-.4957c.0007.0163-.0015.34.0009.355a.5188.5188 0 0 0 .5526.4827l.3842-.0076zm10.1265 2.917-.0884-.0807a.3229.3229 0 0 0-.3843-.0269 6.9823 6.9823 0 0 1-3.8046 1.0068 6.995 6.995 0 0 1-3.7932-1.0068.3228.3228 0 0 0-.3843.0269l-.0884.0807a.3154.3154 0 0 0 0 .4573 6.0305 6.0305 0 0 0 4.2927 1.5988 6.0453 6.0453 0 0 0 4.2889-1.5988.315.315 0 0 0-.0384-.4573zm1.4488-4.4158c0-2.4557-1.1529-4.3273-3.0245-5.2266-.2081-.1022-.4673.0594-.465.2921v1.3297a.3269.3269 0 0 0 .2037.296c1.7332.7109 2.9284 2.1866 2.9284 3.8776 0 2.2712-2.1559 3.8085-5.3419 3.8085-3.1859 0-5.3419-1.5411-5.3419-3.8085 0-1.691 1.1952-3.1667 2.9284-3.8776a.319.319 0 0 0 .2037-.296v-1.322c.0048-.2315-.2536-.3963-.4612-.2921-1.887.8839-3.0399 2.767-3.0399 5.2073 0 2.9899 2.2866 4.996 5.7108 4.996 3.4282.0001 5.6994-2.0098 5.6994-4.9844zm-8.6084-.538h-.0038a.5842.5842 0 1 0 .0038 0zm5.1614.5919c.0063.3226.2615.5789.584.5725a.5842.5842 0 1 0-.584-.5725zm4.5692.6225h-.4996a.3227.3227 0 0 0-.3151.2728c-.0346.173-.0768.3766-.1268.5573.0163.0007.3861-.0014.4012.0009a.5188.5188 0 0 0 .5366-.5004l.0037-.3306z"/></svg>
+<text x="866.0" y="360" fill="#2d3142" font-size="11" font-family="'Geist', system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-weight="600" text-anchor="middle">Trino</text>
+<text x="866.0" y="374" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle">Hive Metastore · :8083</text>
+<rect x="596" y="120" width="152" height="176" rx="8" fill="#f5f5f5"/>
+<rect x="596" y="120" width="152" height="176" rx="8" fill="rgba(191,69,32,0.08)" stroke="#bf4520" stroke-width="1.2"/>
+<rect x="604" y="126" width="34" height="12" rx="2" fill="transparent" stroke="rgba(191,69,32,0.5)" stroke-width="0.8"/>
+<text x="621.0" y="135" fill="rgba(191,69,32,0.8)" font-size="7" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" letter-spacing="0.08em" text-anchor="middle">STORE</text>
+<svg aria-hidden="true" x="716" y="126" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#bf4520" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6a8 3 0 1 0 16 0a8 3 0 1 0 -16 0" /> <path d="M4 6v6a8 3 0 0 0 16 0v-6" /> <path d="M4 12v6a8 3 0 0 0 16 0v-6" /></svg>
+<text x="672.0" y="168" fill="#bf4520" font-size="12" font-family="'Geist', system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-weight="600" text-anchor="middle">Delta Lakehouse</text>
+<text x="672.0" y="182" fill="#bf4520" font-size="8" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle" opacity="0.8">./data · Delta Lake 3.2</text>
+<rect x="608" y="196" width="128" height="16" rx="2" fill="#ffffff" stroke="rgba(191,69,32,0.3)" stroke-width="0.8"/>
+<text x="616" y="207" fill="rgba(191,69,32,0.85)" font-size="7" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" letter-spacing="0.12em" text-anchor="start">BRONZE</text>
+<text x="728" y="207" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="end">raw_*</text>
+<rect x="608" y="218" width="128" height="16" rx="2" fill="#ffffff" stroke="rgba(191,69,32,0.3)" stroke-width="0.8"/>
+<text x="616" y="229" fill="rgba(191,69,32,0.85)" font-size="7" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" letter-spacing="0.12em" text-anchor="start">SILVER</text>
+<text x="728" y="229" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="end">stg_*</text>
+<rect x="608" y="240" width="128" height="16" rx="2" fill="#ffffff" stroke="rgba(191,69,32,0.3)" stroke-width="0.8"/>
+<text x="616" y="251" fill="rgba(191,69,32,0.85)" font-size="7" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" letter-spacing="0.12em" text-anchor="start">GOLD</text>
+<text x="728" y="251" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="end">dim_* · fact_*</text>
+<rect x="608" y="262" width="128" height="16" rx="2" fill="#ffffff" stroke="rgba(191,69,32,0.3)" stroke-width="0.8"/>
+<text x="616" y="273" fill="rgba(191,69,32,0.85)" font-size="7" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" letter-spacing="0.12em" text-anchor="start">FEATURES</text>
+<text x="728" y="273" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="end">feat_* · ml_*</text>
+<svg aria-hidden="true" x="600" y="372" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#4f5d75" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12.54c-1.804 -.345 -2.701 -1.08 -3.523 -2.94c-.487 .696 -1.102 1.568 -.92 2.4c.028 .238 -.32 1 -.557 1h-14c0 5.208 3.164 7 6.196 7c4.124 .022 7.828 -1.376 9.854 -5c1.146 -.101 2.296 -1.505 2.95 -2.46" /> <path d="M5 10h3v3h-3l0 -3" /> <path d="M8 10h3v3h-3l0 -3" /> <path d="M11 10h3v3h-3l0 -3" /> <path d="M8 7h3v3h-3l0 -3" /> <path d="M11 7h3v3h-3l0 -3" /> <path d="M11 4h3v3h-3l0 -3" /> <path d="M4.571 18c1.5 0 2.047 -.074 2.958 -.78" /> <path d="M10 16l0 .01" /></svg>
+<text x="624" y="386" fill="#4f5d75" font-size="8" font-family="'Geist', system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-weight="500" text-anchor="start">Docker Compose</text>
+<svg aria-hidden="true" x="16" y="430" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#4f5d75" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v4a1 1 0 0 0 1 1h4" /> <path d="M17 21h-10a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2" /> <path d="M9 9l1 0" /> <path d="M9 13l6 0" /> <path d="M9 17l6 0" /></svg>
+<text x="484" y="436" fill="#2d3142" font-size="10" font-family="'Geist', system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-weight="600" text-anchor="middle">Governance · contracts + DataHub</text>
+<text x="484" y="450" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle">contracts/*.json checked in DAG validators · static lineage pushed by DataHub CLI (manual)</text>
+<line x1="40" y1="476" x2="960" y2="476" stroke="rgba(45,49,66,0.1)" stroke-width="0.8"/>
+<text x="40" y="492" fill="#4f5d75" font-size="8" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" letter-spacing="0.18em" text-anchor="start">LEGEND</text>
+<rect x="40" y="500" width="20" height="12" rx="3" fill="transparent" stroke="rgba(45,49,66,0.3)" stroke-width="1" stroke-dasharray="4,3"/>
+<rect x="196" y="500" width="20" height="12" rx="3" fill="rgba(45,49,66,0.04)" stroke="rgba(45,49,66,0.25)" stroke-width="1"/>
+<rect x="348" y="500" width="20" height="12" rx="3" fill="rgba(191,69,32,0.1)" stroke="#bf4520" stroke-width="1.2"/>
+<line x1="500" y1="506" x2="520" y2="506" stroke="#bf4520" stroke-width="1.2"/>
+<line x1="664" y1="506" x2="684" y2="506" stroke="#4f5d75" stroke-width="1"/>
+<line x1="800" y1="506" x2="820" y2="506" stroke="rgba(45,49,66,0.35)" stroke-width="1" stroke-dasharray="4,3"/>
+<text x="68" y="510" fill="#4f5d75" font-size="8.5" font-family="'Geist', system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" text-anchor="start">External source</text>
+<text x="224" y="510" fill="#4f5d75" font-size="8.5" font-family="'Geist', system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" text-anchor="start">Docker Compose stack</text>
+<text x="376" y="510" fill="#4f5d75" font-size="8.5" font-family="'Geist', system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" text-anchor="start">Focal store</text>
+<text x="528" y="510" fill="#4f5d75" font-size="8.5" font-family="'Geist', system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" text-anchor="start">Primary data path</text>
+<text x="692" y="510" fill="#4f5d75" font-size="8.5" font-family="'Geist', system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" text-anchor="start">Data flow</text>
+<text x="828" y="510" fill="#4f5d75" font-size="8.5" font-family="'Geist', system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" text-anchor="start">Orchestration trigger</text>
+</svg>

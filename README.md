@@ -65,15 +65,15 @@ over injected issues while keeping the domain realistic. Deterministic seed
 
 ### Data Flow Diagram
 
-Solid arrows carry data records/files. Dashed gray arrows are restricted to
-orchestration/coordination (control plane, not data plane). Arrow prefixes
-identify independent flows: **B** (batch), **S** (streaming), **C**
-(query/serving), and **M** (metadata/orchestration/governance).
+The banner across the top names each phase, and every box sits under its phase.
+Solid arrows carry data; the orange path marks the focal Delta lakehouse.
+The dashed arrow is an Airflow trigger (control plane, not data).
 
 [![VNStock data-flow architecture](docs/images/Dataflow.svg)](docs/images/Dataflow.svg)
 
-> Click the diagram to open the full-size SVG. Dashed boxes are control or governance
-> layers; italic grey text marks outputs with no consumer yet or steps done by hand.
+> Click the diagram to open the full-size SVG. The edge-by-edge detail (including
+> outputs with no consumer yet) is in the
+> [data flow catalog](docs/architecture.md#d-data-flow-catalog).
 
 ### Deployable Units
 

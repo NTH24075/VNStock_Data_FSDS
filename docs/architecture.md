@@ -94,33 +94,34 @@ Lưu ý về inventory:
 
 [![VNStock data-flow architecture](images/Dataflow.svg)](images/Dataflow.svg)
 
-Nhấp vào sơ đồ để mở SVG ở kích thước đầy đủ. Đây là sơ đồ chuẩn dùng chung
-với README; diễn giải chi tiết cho từng cạnh được đặt tại
+Nhấp vào sơ đồ để mở SVG ở kích thước đầy đủ. Đây là sơ đồ tổng quan dùng
+chung với README; mỗi cạnh chi tiết (mã `B*`, `S*`, `C*`, `M*`) nằm ở
 [Data flow catalog](#d-data-flow-catalog).
 
-Màu đường nối:
+Cách đọc sơ đồ:
 
-- **Xanh dương (`B*`)**: batch/file/JDBC/Delta snapshot flow.
-- **Cam (`S*`)**: streaming event flow.
-- **Xanh lá (`C*`)**: query/serving flow.
-- **Xám nét đứt (`M*`)**: metadata, orchestration, coordination hoặc governance;
-  không phải business-data payload.
+- Thanh chevron trên cùng là các giai đoạn; mỗi box nằm đúng cột giai đoạn của nó.
+- **Cam**: đường dữ liệu chính vào/ra Delta Lakehouse (node trọng tâm).
+- **Xám liền**: các luồng dữ liệu còn lại.
+- **Xám nét đứt**: Airflow trigger (control plane, không mang dữ liệu).
+- Hai dải dọc bên phải ghép với thanh Airflow (Orchestration) và thanh
+  Governance (contracts + DataHub).
 
 ### C.1 Phạm vi của sơ đồ
 
 - Box là deployable service hoặc logical storage boundary có thật trong
-  code/config. Lakehouse box là các bảng Delta trên shared volume `./data`,
-  chia theo Bronze → Silver → Gold → Features; nhãn `DP*` trên mũi tên là DAG
-  Airflow thực hiện bước đó.
-- Spark batch và Spark Structured Streaming chạy trên cùng Spark cluster, nên
-  sơ đồ vẽ chúng thành mũi tên vào/ra Lakehouse thay vì box riêng.
+  code/config. Delta Lakehouse là các bảng Delta trên shared volume `./data`,
+  chia Bronze → Silver → Gold → Features; DAG DP1–DP3 thực hiện từng bước.
+- Spark batch và Spark Structured Streaming chạy trên cùng Spark cluster nên
+  chung một box.
 - PyFlink là engine Silver stream: Kafka → PyFlink → `data/flink/current`
   (JSONL) → `load_flink_stream` trong `silver_daily` → `stg_trades` /
   `stg_quotes` / `stg_events_quarantine`.
-- Chữ nghiêng màu xám đánh dấu output chưa có consumer (`raw_market_events`,
-  `raw_financial_ratios`, `feat_stream_volume_5m`, replay JSONL) hoặc bước làm
-  thủ công.
-- DataHub nằm ngoài default Compose. Mũi tên governance chỉ mô tả recipe thủ
+- Sơ đồ tổng quan bỏ các output chưa có consumer (`raw_market_events`,
+  `raw_financial_ratios`, `feat_stream_volume_5m`, replay JSONL), bước mirror
+  landing lên MinIO, SQL client và kết nối Trino → PostgreSQL; tất cả vẫn có
+  trong catalog bên dưới.
+- DataHub nằm ngoài default Compose. Thanh Governance chỉ mô tả recipe thủ
   công đã có, không khẳng định một continuous lineage pipeline.
 
 ## D. Data flow catalog
