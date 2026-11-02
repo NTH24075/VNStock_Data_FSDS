@@ -66,6 +66,4 @@ the registered v1→v2 evolution.
    `validate_contract` gate in the Airflow graph.
 4. Unit tests exercise contract loading/enforcement.
 
-No Airflow task-log screenshot of a deliberate failing contract is present.
-Therefore this idea has executable code and a successful pipeline gate, but
-not the strongest requested pass/fail UI demonstration.
+A deliberate failing-contract run is listed in [Known gaps](rubric_evidence.md#known-gaps).

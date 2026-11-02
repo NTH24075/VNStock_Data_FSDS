@@ -178,7 +178,6 @@ All problems are reproducible (deterministic seed 42).
 │   └── silver/
 ├── scripts/                Setup, maintenance, and query utilities
 └── tests/                  Unit and integration tests
-    ├── fixtures/
     ├── integration/
     └── unit/
 ```

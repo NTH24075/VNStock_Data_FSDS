@@ -17,7 +17,7 @@ Trino can query the `delta.gold_stock` catalog.
 
 **Schema:** `gold_stock` with naming: `dim_`, `fact_`, `obt_`, `feat_`, `agg_` prefixes. Upstream: Bronze uses `raw_`, Silver uses `stg_`.
 
-### Input Data Profile (from 01)
+### Input Data Profile
 
 - **Offline:** ~400 tickers × 1 row/day × 2 main tables ≈ 800 rows/trading day (+ quarterly ratios); 180-day backfill ≈ 100K offline rows. Arrives once per day after market close (generator "end-of-day drop" to `landing-vendor-offline/`).
 - **Streaming:** ~200 events/min baseline, ~5,000 events/min in ATO/ATC bursts → ~150K–200K events/trading day; intraday trade fact grows to ~25–35M rows over the backfill window. Arrives continuously 09:00–14:45 with two ×25 bursts and a lunch-break silence window (11:30–13:00).

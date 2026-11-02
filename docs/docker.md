@@ -30,16 +30,8 @@ The optimized `Dockerfile` uses a builder stage for the virtual environment, a
 and configuration. The runtime no longer installs `vnstock` or Faker: `vnstock`
 is used only to refresh the frozen seed and Faker is not used by generation.
 
-The baseline value was recorded when the older image still existed. That
-baseline tag is no longer present in the current Docker runtime, so it must
-not be represented by a fabricated terminal capture. The optimized image can
-still be inspected; reproducing a terminal side-by-side requires rebuilding
-the historical baseline first.
-
-No Docker screenshots are present in `docs/images/`. Consequently the
-multi-stage implementation and recorded 18.7% reduction are documented, but
-the rubric's visual proof requirement is not satisfied by the current
-evidence set.
+The baseline value was recorded before the old image tag was removed; a
+side-by-side capture needs the baseline rebuilt (see [Known gaps](rubric_evidence.md#known-gaps)).
 
 ## Commands
 

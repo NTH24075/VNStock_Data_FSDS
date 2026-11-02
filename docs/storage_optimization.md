@@ -12,8 +12,7 @@ one partition per ticker. `jobs/gold/maintenance.py` and the weekly
   unnecessary file scans.
 - **Optimization:** partition facts by `trade_date`, compact files, then
   Z-order ticker-heavy tables by `ticker_id`.
-- **Result evidence:** implementation exists, but no before/after file-count,
-  bytes-scanned or query-duration screenshot is in the submitted image set.
+- **Result evidence:** implementation only; before/after measurement is in [Known gaps](rubric_evidence.md#known-gaps).
 - **Trade-off:** compaction rewrites data and temporarily uses extra I/O and
   storage; date partitioning is intentionally not combined with a
   high-cardinality ticker partition.
@@ -39,8 +38,7 @@ schema evolution, while Delta transaction logs provide atomic table versions.
 - **Workload:** `obt_ticker_daily_performance` filtered by date range and icb_l1
 - **Bottleneck:** Full scan across dates; small-file problem from daily incremental writes
 - **Fix:** Partition by daily `trade_date`, Z-order by `ticker_id`; scheduled `OPTIMIZE` compaction weekly via `delta_maintenance` DAG
-- **Result:** no before/after file-count, bytes-scanned or duration screenshot
-  was submitted, so no percentage improvement is claimed
+- **Result:** not yet measured (see [Known gaps](rubric_evidence.md#known-gaps))
 - **Trade-off:** Weekly compaction adds maintenance job; temporary 2× storage during rewrite
 
 ### Optimization 2 — Intraday Momentum Query (single ticker)

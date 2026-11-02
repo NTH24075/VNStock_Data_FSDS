@@ -201,7 +201,7 @@ The generator ensures intraday trades are **consistent with the daily OHLC** for
 
 This cross-consistency is deliberately checkable downstream — a mismatch signals a pipeline bug, not a data problem.
 
-## 5. Drift Simulation (from 03)
+## 5. Drift Simulation
 
 ### 5.1 Scenario A: Volatility Regime Shift
 
@@ -326,7 +326,7 @@ python -m generator.main --mode all --config config/generator.yaml
 
 Drift config (`config/drift.yaml`) is auto-merged into the main config if present (see `generator/main.py:load_config()`).
 
-## 10. Implementation Tips (from coursework 01 §7)
+## 10. Implementation Tips
 
 - **Deterministic seed** (`random_seed: 42`) so every run reproduces identical data.
 - **Dedup keys:** (`ticker_id`, `trade_date`) for offline OHLCV; (`event_id`, latest `created_ts`) for streaming.

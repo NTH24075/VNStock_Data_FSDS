@@ -93,7 +93,7 @@ Lưu ý về inventory:
 
 ## C. System architecture diagram
 
-[![VNStock data-flow architecture](images/dataflow.svg)](images/dataflow.svg)
+[![VNStock data-flow architecture](images/Dataflow.svg)](images/Dataflow.svg)
 
 Nhấp vào sơ đồ để mở SVG ở kích thước đầy đủ. Đây là sơ đồ chuẩn dùng chung
 với README; diễn giải chi tiết cho từng cạnh được đặt tại
