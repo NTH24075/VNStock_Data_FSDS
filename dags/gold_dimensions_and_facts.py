@@ -3,7 +3,7 @@
 # =============================================================================
 # Airflow DAG: Gold Dimensions + Facts + OBT (DP2 — part 2)
 # =============================================================================
-# Schedule: daily, after silver_daily completes.
+# Schedule: triggered by the silver_daily Dataset (runs only after DP2 Silver passes).
 # SCD2 merge for dim_ticker, adj_close computation, fact/OBT incremental merge.
 #
 # Pipeline: Ingest (from Silver) → Validate
@@ -14,6 +14,7 @@ import os
 from datetime import datetime, timedelta
 
 from airflow import DAG
+from airflow.datasets import Dataset
 from airflow.operators.python import PythonOperator
 
 default_args = {
@@ -26,11 +27,12 @@ with DAG(
     dag_id="gold_dimensions_and_facts",
     default_args=default_args,
     start_date=datetime(2025, 7, 1),
-    schedule_interval="30 16 * * *",
+    schedule=[Dataset("vnstock://silver/daily")],
     catchup=False,
     max_active_tasks=1,
     tags=["gold", "dimensions", "facts", "obt", "dp2"],
 ) as dag:
+    BRONZE_DIR = os.getenv("BRONZE_DIR", "data/bronze")
     SILVER_DIR = os.getenv("SILVER_DIR", "data/silver")
     GOLD_DIR = os.getenv("GOLD_DIR", "data/gold")
 
@@ -42,7 +44,7 @@ with DAG(
         spark = get_spark("gold_dim_ticker")
         try:
             df = read_silver_daily(spark, SILVER_DIR)
-            build_dim_ticker(spark, df, GOLD_DIR)
+            build_dim_ticker(spark, df, GOLD_DIR, BRONZE_DIR)
         finally:
             spark.stop()
 
@@ -131,9 +133,6 @@ with DAG(
                 "fact_daily_price",
             ]:
                 path = os.path.join(GOLD_DIR, table)
-                if not os.path.exists(path):
-                    print(f"  {table}: missing — skipping")
-                    continue
                 df = spark.read.format("delta").load(path)
                 print(f"  {table}: {df.count()} rows")
 
@@ -165,8 +164,6 @@ with DAG(
         spark = get_spark("gold_val_scd2")
         try:
             path = os.path.join(GOLD_DIR, "dim_ticker")
-            if not os.path.exists(path):
-                return
             df = spark.read.format("delta").load(path)
             # At most one is_current=True per ticker_id
             current = df.filter(F.col("is_current"))
@@ -219,7 +216,11 @@ with DAG(
         task_id="validate_gold_contracts",
         python_callable=validate_gold_contracts,
     )
-    t_ops = PythonOperator(task_id="write_run_metadata", python_callable=write_run_metadata)
+    t_ops = PythonOperator(
+        task_id="write_run_metadata",
+        python_callable=write_run_metadata,
+        outlets=[Dataset("vnstock://gold/daily")],
+    )
 
     t_dim >> [t_fp, t_ff, t_fi]
     t_static >> [t_fp, t_ff, t_fi]

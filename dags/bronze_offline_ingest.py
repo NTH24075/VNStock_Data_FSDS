@@ -17,6 +17,7 @@ from datetime import datetime, timedelta
 from urllib.parse import urlparse
 
 from airflow import DAG
+from airflow.datasets import Dataset
 from airflow.operators.python import PythonOperator
 
 default_args = {
@@ -111,8 +112,6 @@ with DAG(
                 .save(out_path)
             )
             print(f"  Wrote {df.count()} rows -> {out_path}")
-        except FileNotFoundError as e:
-            print(f"  Skipping foreign_flow_daily: {e}")
         finally:
             spark.stop()
 
@@ -147,21 +146,6 @@ with DAG(
                 .save(out_path)
             )
             print(f"  Wrote {df.count()} rows -> {out_path}")
-        except Exception as e:
-            print(f"  JDBC corporate_actions failed, falling back to Parquet: {e}")
-            try:
-                df = _read_landing(spark, "corporate_actions")
-                df = add_ingest_metadata(df, batch_id, 1)
-                out_path = os.path.join(BRONZE_DIR, "raw_corporate_actions")
-                (
-                    df.write.format("delta")
-                    .mode("overwrite")
-                    .option("overwriteSchema", "true")
-                    .save(out_path)
-                )
-                print(f"  Fallback Parquet: {df.count()} rows -> {out_path}")
-            except FileNotFoundError as e2:
-                print(f"  Skipping corporate_actions: {e2}")
         finally:
             spark.stop()
 
@@ -194,8 +178,6 @@ with DAG(
                 .save(out_path)
             )
             print(f"  Wrote {df.count()} rows -> {out_path}")
-        except Exception as e:
-            print(f"  JDBC tickers failed: {e}")
         finally:
             spark.stop()
 
@@ -219,12 +201,31 @@ with DAG(
                 .save(out_path)
             )
             print(f"  Wrote {df.count()} rows -> {out_path}")
-        except FileNotFoundError as e:
-            print(f"  Skipping financial_ratios: {e}")
         finally:
             spark.stop()
 
     # === Validate stage ===
+
+    def _bronze_tables():
+        """List every DP1 Bronze table as (base name, version, path); fail if one is missing."""
+        tables = [
+            (base, v, os.path.join(BRONZE_DIR, f"{base}_v{v}"))
+            for base, v in [("raw_ohlcv_daily", 1), ("raw_ohlcv_daily", 2)]
+            if os.path.exists(os.path.join(BRONZE_DIR, f"{base}_v{v}"))
+        ]
+        if not tables:
+            raise FileNotFoundError(f"No raw_ohlcv_daily_v* table in {BRONZE_DIR}")
+        for base in [
+            "raw_foreign_flow",
+            "raw_corporate_actions",
+            "raw_financial_ratios",
+            "raw_tickers",
+        ]:
+            path = os.path.join(BRONZE_DIR, base)
+            if not os.path.exists(path):
+                raise FileNotFoundError(f"Required Bronze table is missing: {path}")
+            tables.append((base, 1, path))
+        return tables
 
     def validate_contract(**context):
         """Revalidate Bronze schemas against registered JSON contracts."""
@@ -237,25 +238,14 @@ with DAG(
         contracts_dir = Path(os.getenv("CONTRACTS_DIR", "/opt/project/contracts"))
         spark = get_spark("bronze_validate_contract")
         try:
-            for table_base, versions in [
-                ("raw_ohlcv_daily", [1, 2]),
-                ("raw_foreign_flow", [1]),
-                ("raw_corporate_actions", [1]),
-                ("raw_financial_ratios", [1]),
-            ]:
-                for v in versions:
-                    path = os.path.join(
-                        BRONZE_DIR,
-                        f"{table_base}_v{v}" if table_base == "raw_ohlcv_daily" else table_base,
-                    )
-                    contract_path = contracts_dir / f"{table_base}.v{v}.json"
-                    if not os.path.exists(path):
-                        continue
-                    df = spark.read.format("delta").load(path)
-                    if contract_path.exists():
-                        with open(contract_path) as f:
-                            _validate(df, json.load(f), v)
-                    print(f"  {table_base} v{v}: {df.count()} rows OK")
+            for table_base, v, path in _bronze_tables():
+                df = spark.read.format("delta").load(path)
+                contract_path = contracts_dir / f"{table_base}.v{v}.json"
+                # Only registered contracts are enforced; other tables get the quality gate.
+                if contract_path.exists():
+                    with open(contract_path) as f:
+                        _validate(df, json.load(f), v)
+                print(f"  {table_base} v{v}: {df.count()} rows OK")
         finally:
             spark.stop()
 
@@ -266,27 +256,17 @@ with DAG(
         spark = get_spark("bronze_validate_quality")
         try:
             print("=== Quality Checks ===")
-            for table_base, versions in [
-                ("raw_ohlcv_daily", [1, 2]),
-                ("raw_foreign_flow", [1]),
-                ("raw_corporate_actions", [1]),
-                ("raw_financial_ratios", [1]),
-            ]:
-                for v in versions:
-                    path = os.path.join(
-                        BRONZE_DIR,
-                        f"{table_base}_v{v}" if table_base == "raw_ohlcv_daily" else table_base,
-                    )
-                    if not os.path.exists(path):
-                        continue
-                    df = spark.read.format("delta").load(path)
-                    cnt = df.count()
-                    print(f"  {table_base} v{v}: {cnt} rows")
-                    for col in ["ticker_id", "trade_date"]:
-                        if col in df.columns:
-                            nulls = df.filter(df[col].isNull()).count()
-                            if nulls > 0:
-                                raise ValueError(f"{col} has {nulls} nulls in {table_base}")
+            for table_base, v, path in _bronze_tables():
+                df = spark.read.format("delta").load(path)
+                cnt = df.count()
+                print(f"  {table_base} v{v}: {cnt} rows")
+                if cnt == 0:
+                    raise ValueError(f"{table_base} v{v} is empty")
+                for col in ["ticker_id", "trade_date"]:
+                    if col in df.columns:
+                        nulls = df.filter(df[col].isNull()).count()
+                        if nulls > 0:
+                            raise ValueError(f"{col} has {nulls} nulls in {table_base}")
         finally:
             spark.stop()
 
@@ -308,7 +288,9 @@ with DAG(
         task_id="validate_contract", python_callable=validate_contract
     )
     t_validate_quality = PythonOperator(
-        task_id="validate_quality", python_callable=validate_quality
+        task_id="validate_quality",
+        python_callable=validate_quality,
+        outlets=[Dataset("vnstock://bronze/offline")],
     )
 
     # DAG structure: Ingest → Validate (tickers + corporate_actions via JDBC, rest via Parquet)

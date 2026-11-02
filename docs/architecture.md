@@ -150,9 +150,9 @@ Batch layer outputs confirmed by implementation:
 | S1 | Generator → Kafka | Kafka protocol via `kafka-python`; JSON value, ticker key | `trade`, `quote`, `index_update` events | Topic `stock_market_events_v3`, 4 partitions, configured `retention.ms=-1` | `generator/main.py`; `generator/writers.py`; `config/generator.yaml` | High |
 | S1b | Generator → replay store | Local JSONL write | Cùng generated events | `data/events/YYYY-MM-DD/HH/events.jsonl` | `generator/main.py`; `generator/writers.py` | High |
 | S2 | Kafka → Spark Bronze stream | Spark Kafka source | Raw Kafka key/value, topic, partition, offset, timestamp | `raw_market_events` Delta + checkpoint | `jobs/bronze/stream.py`; `dags/bronze_stream_ingest.py` | High |
-| S3a | Bronze Delta → Spark Silver stream | Delta Structured Streaming | `payload_json` + Kafka metadata | `stg_trades`, `stg_quotes`, `stg_events_quarantine` Delta | `jobs/silver/stream.py`; `dags/silver_stream.py` | High |
 | S3b | `stg_trades` → Spark feature stream | Delta Structured Streaming | Deduplicated trade events | `feat_stream_intraday` Delta + checkpoint | `jobs/features/stream.py`; `dags/feat_stream_job.py` | High |
-| S4–S5 | Kafka → PyFlink → `data/flink` | Flink Kafka connector + checkpointed `FileSink` | Raw JSON events | `stg_events`, `stg_events_quarantine`, `feat_stream_volume_5m` JSONL | `jobs/flink/silver_stream.py`; `docker-compose.yml` | High |
+| S4–S5 | Kafka → PyFlink → `data/flink/current` | Flink Kafka connector + checkpointed `FileSink` | Raw JSON events | `stg_events`, `stg_events_quarantine`, `feat_stream_volume_5m` JSONL | `jobs/flink/silver_stream.py`; `docker-compose.yml` | High |
+| S3a | Flink JSONL → Silver Delta | Spark batch, insert-only `MERGE` on `event_id` | Committed `stg_events` / quarantine files | `stg_trades`, `stg_quotes`, `stg_events_quarantine` Delta | `jobs/silver/flink_output.py`; `dags/silver_daily.py` | High |
 
 Streaming semantics:
 
@@ -160,14 +160,11 @@ Streaming semantics:
   `starting_offsets` và `available_now`.
 - PyFlink đọc `earliest`, dùng consumer group có thể cấu hình, parallelism 4,
   checkpoint mỗi 30 giây và 60-second bounded out-of-orderness watermark.
-- Spark Silver dùng `dropDuplicatesWithinWatermark(["event_id"])`; record có
-  `created_ts - event_ts > watermark_sec` được đánh `_late_flag`.
 - PyFlink giữ event đầu tiên cho mỗi `event_id` bằng keyed state. State không có
   TTL trong code hiện tại.
-- Spark Silver chỉ materialize accepted `trade` và `quote`; accepted
-  `index_update` không có downstream Delta table.
-- Flink giữ mọi accepted event trong `stg_events`, nhưng output là JSONL, không
-  phải Delta table.
+- Flink là engine Silver stream duy nhất. `load_flink_stream` chỉ materialize
+  accepted `trade` và `quote` thành Delta; `index_update` không có downstream
+  Delta table.
 
 ### D.3 Query and serving flow
 
@@ -219,20 +216,18 @@ Trino acts as a single SQL query interface across **Delta Lake on MinIO** (objec
 
 | DAG | Schedule/trigger | Main input → output | Retry policy | Explicit dependency boundary |
 |---|---|---|---|---|
-| `bronze_offline_ingest` | `30 15 * * *` | Local landing + PostgreSQL → Bronze Delta | 3 retries, 5 min | Internal ingest tasks → contract validation → quality validation |
-| `silver_daily` | `0 16 * * *` | Bronze daily tables → Silver daily tables | 3 retries, 5 min | Dedup branches → uniqueness → validation fan-out |
-| `gold_dimensions_and_facts` | `30 16 * * *` | Silver + Bronze actions → dimensions/facts/OBT | 2 retries, 10 min | Dimensions → facts → OBT → validations → ops metadata |
-| `feat_daily_job` | `0 17 * * *` | Gold facts → daily/unified features, labels, drift, training | 2 retries, 10 min | Feature and label branches converge at training |
+| `bronze_offline_ingest` | `30 15 * * *` → emits `vnstock://bronze/offline` | Local landing + PostgreSQL → Bronze Delta | 3 retries, 5 min | Internal ingest tasks → contract validation → quality validation |
+| `silver_daily` | Dataset `vnstock://bronze/offline` | Bronze daily tables + Flink JSONL → Silver Delta | 3 retries, 5 min | Dedup + Flink load → uniqueness → validation fan-out → `publish_silver` |
+| `gold_dimensions_and_facts` | Dataset `vnstock://silver/daily` | Silver + Bronze actions → dimensions/facts/OBT | 2 retries, 10 min | Dimensions → facts → OBT → validations → ops metadata |
+| `feat_daily_job` | Dataset `vnstock://gold/daily` | Gold facts → daily/unified features, labels, drift, training | 2 retries, 10 min | Feature and label branches converge at training |
 | `bronze_stream_ingest` | `@once` | Kafka → Bronze Delta | 2 retries, 2 min | One long-running/available-now task |
-| `silver_stream` | `@once` | Bronze stream Delta → Silver stream Delta | 2 retries, 2 min | One task starts three streaming queries |
 | `feat_stream_job` | `@once` | Silver trades → Gold stream features | 2 retries, 2 min | One streaming query task |
 | `flink_silver_stream` | `@once` | Flink REST state → validation result | 2 retries, 2 min | Health check → exactly-one-running-job check |
 | `delta_maintenance` | `0 3 * * 0` | Gold Delta → compacted/Z-ordered Gold Delta | 1 retry, 10 min | One maintenance task |
 
-Các batch DAG chỉ được xếp lịch lệch nhau 30 phút. Không có
-`ExternalTaskSensor`, Airflow Dataset, `TriggerDagRunOperator` hoặc một parent
-DAG nối DP1 → DP2 → DP3. Vì vậy cross-DAG dependency là **Inferred by schedule,
-not enforced**. Tương tự, Airflow Flink DAG chỉ monitor; submit/cancel
+DP1 → DP2 → DP3 được nối bằng Airflow Dataset: task cuối của mỗi DAG khai báo
+`outlets`, DAG sau dùng `schedule=[Dataset(...)]`, nên một DAG thất bại sẽ chặn
+các DAG phía sau. Riêng Airflow Flink DAG chỉ monitor; submit/cancel
 application được thực hiện thủ công bằng `make flink-submit` hoặc Flink CLI.
 
 ## F. Storage, network and deployment topology
@@ -315,11 +310,11 @@ Tài liệu này chỉ liệt kê tên biến, không đọc hoặc hiển thị
 | Gold mirror to MinIO | **Confirmed but manual/profile-gated** | `minio-sync-gold` runs only through tools profile/Make target |
 | Hive/Trino Gold registration | **Unverified automation** | Connector config exists; no schema/table registration bootstrap is present |
 | Trino federated query capability | **Configured; manual setup evidence** | Both connector files and SQL examples exist; runtime lifecycle is not automated |
-| Explicit DP1 → DP2 → DP3 DAG dependency | **Not implemented** | Only cron ordering exists across DAGs |
-| PyFlink output feeds Spark/Delta/Gold | **Not implemented** | Flink sinks JSONL under `data/flink`; no downstream reader exists |
+| Explicit DP1 → DP2 → DP3 DAG dependency | **Implemented** | Airflow Datasets chain the DAGs |
+| PyFlink output feeds Spark/Delta/Gold | **Implemented (batch hand-off)** | `silver_daily.load_flink_stream` merges Flink JSONL into `stg_trades`/`stg_quotes` |
 | Flink application submission by Airflow | **Not implemented** | Airflow DAG only calls REST for health and running-job validation |
 | Streaming JSON contracts enforced at runtime | **Not implemented** | Contract files exist but streaming code never loads them |
-| `raw_tickers` feeds `dim_ticker` | **Not implemented** | Gold dimension reads seed JSON, not Bronze `raw_tickers` |
+| `raw_tickers` feeds `dim_ticker` | **Implemented** | `build_dim_ticker` reads Bronze `raw_tickers`, including the vendor `vn30` flag |
 | Financial ratios reach Silver/Gold | **Not implemented** | Flow ends at `raw_financial_ratios` |
 | Index events reach a Spark Silver table | **Not implemented** | Accepted index events are neither trades nor quotes |
 | Corporate-action point-in-time correctness | **Partial** | `fact_daily_price` applies future ex-date factors but does not use `announced_ts` knowledge time |

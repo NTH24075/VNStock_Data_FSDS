@@ -40,7 +40,7 @@ Other checked Gold results:
 | Stage | Successful run/job | Duration/state | Verified output |
 |---|---|---:|---:|
 | Bronze Kafka replay | `manual__2026-07-23T18:18:00+00:00` | 125.7 s | 197,925 raw events |
-| Silver Spark stream | `manual__2026-07-23T18:21:00+00:00` | 148.5 s | 165,668 trades; 23,358 quotes |
+| Silver Spark stream (since replaced by Flink hand-off) | `manual__2026-07-23T18:21:00+00:00` | 148.5 s | 165,668 trades; 23,358 quotes |
 | Gold stream features | `manual__2026-07-23T18:24:00+00:00` | 248.9 s | 17,845 feature windows |
 | Flink Airflow monitor | `manual__2026-07-23T19:36:00+00:00` | 60.4 s | cluster healthy; v10 is sole running job |
 | Flink application | `377ab5e5eb029d8f905db390c54549b6` | `RUNNING`, 12/12 tasks | 195,000 deduped events; 17,845 five-minute windows |
@@ -155,6 +155,9 @@ Single list of evidence not yet captured; topic documents link here instead of r
 - Flink baseline vs optimized run (e.g. parallelism 1 vs 4) with backpressure during the burst.
 - Airflow Connections/Variables (endpoints are currently environment variables).
 - Delta compaction/Z-order before/after file and query statistics.
+- Re-run and re-capture DP1–DP3 after the Dataset chaining and Flink → Silver
+  hand-off (`load_flink_stream`, `publish_silver`); Figures 06–09 and the
+  reference-execution table predate that change.
 - DataHub DP1–DP3 lineage, validation and contract/schema entities.
 - A full all-zone DBeaver ER diagram.
 - A deliberate contract-failure Airflow task log.

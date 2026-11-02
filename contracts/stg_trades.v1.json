@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "stg_trades.v1",
-  "description": "Deduplicated trade events from silver_stream — grain: one per trade_id",
+  "description": "Deduplicated trade events from the PyFlink Silver job — grain: one per trade_id",
   "type": "object",
   "required": ["event_id", "event_ts", "ticker", "price", "quantity", "trade_id"],
   "properties": {

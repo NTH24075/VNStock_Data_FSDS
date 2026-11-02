@@ -239,7 +239,7 @@ services:
       - JOB_MANAGER_RPC_ADDRESS=flink-jobmanager
       - KAFKA_BROKER=kafka:29092
       - KAFKA_TOPIC=stock_market_events_v3
-      - FLINK_OUTPUT_DIR=/opt/flink/data
+      - FLINK_OUTPUT_DIR=/opt/flink/data/current
     ports:
       - "8081:8081"
     volumes:
@@ -289,6 +289,7 @@ services:
       SEED_PATH: /opt/project/generator/seed/tickers_reference.json
       BRONZE_DIR: /opt/project/data/bronze
       SILVER_DIR: /opt/project/data/silver
+      FLINK_OUTPUT_DIR: /opt/project/data/flink/current
       GOLD_DIR: /opt/project/data/gold
       DATA_DIR: /opt/project/data/landing
       SPARK_MASTER_URL: spark://spark-master:7077
@@ -324,6 +325,7 @@ services:
       SEED_PATH: /opt/project/generator/seed/tickers_reference.json
       BRONZE_DIR: /opt/project/data/bronze
       SILVER_DIR: /opt/project/data/silver
+      FLINK_OUTPUT_DIR: /opt/project/data/flink/current
       GOLD_DIR: /opt/project/data/gold
       DATA_DIR: /opt/project/data/landing
       SPARK_MASTER_URL: spark://spark-master:7077
